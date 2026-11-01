@@ -2,17 +2,25 @@
 
 An account research agent for GTM teams. Provide a company website, your offering and ideal customer criteria. AccountBrief researches relevant pages, checks exact source evidence and returns a fit assessment plus a reviewable outreach draft.
 
-## Requirements
+## Use the hosted app
 
-- Python 3.10 or newer
+Open the shared Render URL in a browser. No login, installation or personal Gemini key is required for visitors. Enter a company website, your offering and customer criteria, then select **Build account brief**.
+
+The hosted service uses the owner's Gemini key stored in Render's private environment settings. Visitor research consumes the owner's shared Gemini quota. The key stays on the server and is never displayed to visitors. Availability depends on the hosting service and the owner's model/project quota.
+
+## Run locally
+
+### Requirements
+
+- Python 3.10 or newer (the Render configuration selects Python 3.13)
 - A browser and internet connection
-- Your own Gemini API key with access to the configured model
+- Your own Gemini API key with access to the configured model, if running your own local copy or deployment
 
 The research core uses Python's standard library. The HTTP server uses Flask and Waitress, pinned in `requirements.txt`. No frontend build or database is required.
 
-## Setup
+### Setup
 
-Create and activate an isolated environment from this directory:
+Create and activate an isolated environment from the repository root:
 
 ```sh
 python3 -m venv .venv
@@ -38,13 +46,13 @@ GEMINI_RPM=5
 
 `.env` is ignored by Git and excluded from the source ZIP. Keep it private. The app reads it server-side; the key is not sent to the browser.
 
-## Run
+### Start the server
 
 ```sh
 python3 app.py
 ```
 
-Open **http://127.0.0.1:8765**. Keep the terminal running; stop with Ctrl+C. For a different local port:
+Open **http://127.0.0.1:8765**. Keep the virtual environment active and the terminal running; stop with Ctrl+C. For a different local port:
 
 ```sh
 python3 app.py --port 8766
@@ -52,7 +60,7 @@ python3 app.py --port 8766
 
 Local startup defaults to `127.0.0.1:8765`. On Render, the app binds to `0.0.0.0` and the assigned `PORT`, uses Waitress, provides public access without a login and trusts only the HTTPS scheme from Render's proxy. Use `render.yaml` in this directory for a Render Blueprint deployment. Make `accountbrief/` your Git repository root and leave Render’s Root Directory empty. The blueprint intentionally has no `rootDir` setting.
 
-## Use
+## Research workflow
 
 1. Enter a real public company website, such as `https://www.atlassian.com/`.
 2. Describe your offering in 20–1200 characters.
@@ -132,18 +140,50 @@ Expected output: JSON containing `status`, `coverage`, explained `fit` entries, 
 python3 -m unittest discover -s tests -v
 ```
 
-Tests mock webpage retrieval/provider responses; running the suite does not consume Gemini quota. Coverage includes normal/sparse/invalid cases, adaptive tool calls, exact evidence IDs, targeted source selection, outreach safeguards, request budgets/pacing, TLS errors, quota/provider failures and bounded 503 retry. The application has also completed approved live Atlassian research runs; that does not establish future model availability or output accuracy.
+Tests mock webpage retrieval/provider responses; running the suite does not consume Gemini quota. Coverage includes normal/sparse/invalid cases, adaptive tool calls, exact evidence IDs, targeted source selection, outreach safeguards, request budgets/pacing, TLS errors, quota/provider failures and bounded 503 retry. The application has also completed live Atlassian research runs. Live responses vary; past successful runs do not guarantee future model availability or accuracy.
 
-Public retrieval requires same-host HTTP(S) URLs, public DNS destinations, verified TLS and robots permission. Cross-host redirects, login/paywall pages and JavaScript-only content are not supported. Render production mode requires the Gemini key, but no access username or password. A single in-process research gate prevents concurrent model runs; `MAX_DAILY_RESEARCH` defaults to 20 research attempts per UTC day in production. This allowance is in-memory and resets on server restart, redeploy or free-service sleep/restart; it is not an account-wide or persistent spending cap. Invalid input is rejected before allowance consumption. Valid research attempts count even if provider/retrieval fails. A multi-instance deployment would require shared quota storage. No deployment or push is performed by these configuration files.
+Public retrieval requires same-host HTTP(S) URLs, public DNS destinations, verified TLS and robots permission. Cross-host redirects, login/paywall pages and JavaScript-only content are not supported. Render production mode requires the Gemini key, but no access username or password. A single in-process research gate prevents concurrent model runs; `MAX_DAILY_RESEARCH` defaults to 20 research attempts per UTC day in production. This allowance is in-memory and resets on server restart, redeploy or free-service sleep/restart; it is not an account-wide or persistent spending cap. Invalid input is rejected before allowance consumption. Valid research attempts count even if provider/retrieval fails. A multi-instance deployment would require shared quota storage.
+
+## Deploy on Render
+
+The repository root contains `render.yaml`. It selects a Free Python web service with these settings:
+
+| Setting | Value |
+|---|---|
+| Root Directory | Leave empty |
+| Build Command | `pip install -r requirements.txt` |
+| Start Command | `python app.py` |
+| Health Check Path | `/api/health` |
+
+For Blueprint deployment, connect the Git repository and select the root `render.yaml`. Supply `GEMINI_API_KEY` when prompted. For manual Web Service setup, use the table above and add:
+
+| Environment variable | Value |
+|---|---|
+| `APP_ENV` | `production` |
+| `HOST` | `0.0.0.0` |
+| `GEMINI_API_KEY` | The service owner's private Gemini key |
+| `GEMINI_MODEL` | `gemini-3.5-flash-lite` |
+| `GEMINI_RPM` | Your actual quota; the template starts at `5` |
+| `MAX_DAILY_RESEARCH` | `20` initially; adjust to your quota |
+
+Render supplies the port and service hostname metadata automatically. Do not upload `.env` or put secrets in `render.yaml`. No access username or password is needed. For a custom domain, also set `APP_ORIGIN` to its full HTTPS origin.
+
+After deployment, verify the public URL loads without a login, `/api/health` returns only `{"ok":true}`, a research run completes and downloads work. Render Free services can sleep when idle, so the first load may require a startup wait. Provider 503/quota failures and hosting cold starts are separate conditions.
+
+## Verification and scope
+
+The latest local suite has **84 passing tests**, including public routes, HTTPS proxy/origin handling, host validation, payload limits, request pacing, concurrency and daily allowances. A local Waitress smoke test exercised server startup and the browser assets without making model calls. After deployment, run the hosted checklist above; local tests do not verify the deployed environment.
+
+Implemented: adaptive account research, targeted source selection, exact evidence references, fit explanations, conditional discovery questions, reviewable outreach drafts, exports, a CLI/API and deployment controls.
+
+Not implemented: contact enrichment, external search engines, JavaScript rendering, CRM integration, email sending, persistent account history or multi-instance quota coordination. Test-only fixtures and simulated provider responses are used in the automated suite; the application does not fall back to synthetic research.
+
+AI tools assisted implementation, tests and documentation. Output was checked through automated tests, local server checks and live research runs. Human review is still required for evidence relevance and outreach wording.
 
 ## References
 
 - [Gemini function calling](https://ai.google.dev/gemini-api/docs/function-calling)
 - [Gemini rate limits](https://ai.google.dev/gemini-api/docs/rate-limits)
 - [Gemini troubleshooting](https://ai.google.dev/gemini-api/docs/troubleshooting)
-
-## Deployment verification
-
-84 tests pass, including public routes, Render HTTPS-origin handling, host validation, cross-site rejection, payload limits, concurrency and daily allowances, failure cleanup and environment-based binding. An actual local Waitress smoke test verified readiness, HTTPS headers and the static UI with a fake API key and no Gemini calls. The Render service itself has not yet been created or tested.
-
-Reviewer login has been removed. `ACCESS_USERNAME` and `ACCESS_PASSWORD` are not needed in Render; any old values are ignored. Anyone with the URL can use the app, subject to the shared research/request allowances. The Gemini key remains server-side.
+- [Render web services](https://render.com/docs/web-services)
+- [Render free-plan limits](https://render.com/docs/free)
