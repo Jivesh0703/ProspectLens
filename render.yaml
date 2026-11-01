@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: accountbrief
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    healthCheckPath: /api/health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: HOST
+        value: 0.0.0.0
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash-lite
+      - key: GEMINI_RPM
+        value: "5"
+      - key: MAX_DAILY_RESEARCH
+        value: "20"
+      - key: ACCESS_USERNAME
+        value: reviewer
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: ACCESS_PASSWORD
+        sync: false

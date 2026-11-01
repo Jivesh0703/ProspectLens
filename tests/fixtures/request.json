@@ -1,0 +1,10 @@
+{
+  "mode": "gemini",
+  "url": "https://meridian.example/",
+  "product": "LedgerFlow helps B2B software finance teams reconcile invoice payments and investigate unmatched transactions.",
+  "criteria": [
+    "B2B software",
+    "Recurring billing",
+    "International customers"
+  ]
+}
