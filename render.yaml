@@ -17,9 +17,5 @@ services:
         value: "5"
       - key: MAX_DAILY_RESEARCH
         value: "20"
-      - key: ACCESS_USERNAME
-        value: reviewer
       - key: GEMINI_API_KEY
-        sync: false
-      - key: ACCESS_PASSWORD
         sync: false

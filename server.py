@@ -1,9 +1,6 @@
 """Production HTTP surface for AccountBrief; research logic stays in app.py."""
 from __future__ import annotations
-import base64
-import binascii
 import datetime as dt
-import hmac
 import os
 import threading
 from urllib.parse import urlsplit
@@ -43,10 +40,6 @@ def create_app(settings=None, research_runner=None):
         settings=dict(settings)
     on_render=settings.get('RENDER','').lower()=='true'
     production=on_render or settings.get('APP_ENV')=='production'
-    username=settings.get('ACCESS_USERNAME','reviewer')
-    password=settings.get('ACCESS_PASSWORD','')
-    if production and (not username or len(password)<12):
-        raise ValueError('Production requires ACCESS_USERNAME and ACCESS_PASSWORD (at least 12 characters).')
     if production and not settings.get('GEMINI_API_KEY','').strip():
         raise ValueError('Production requires GEMINI_API_KEY.')
     try:
@@ -84,29 +77,6 @@ def create_app(settings=None, research_runner=None):
     gate=ResearchGate(daily_limit)
     web.extensions['research_gate']=gate
     runner=research_runner or core.run
-
-    @web.before_request
-    def require_access():
-        if request.path=='/api/health' and request.method in ('GET','HEAD'):
-            return None
-        if not password:
-            return None
-        header=request.headers.get('Authorization','')
-        valid=False
-        try:
-            scheme,token=header.split(' ',1)
-            if scheme.lower()=='basic':
-                decoded=base64.b64decode(token,validate=True).decode('utf-8')
-                user,secret=decoded.split(':',1)
-                valid=hmac.compare_digest(user.encode(),username.encode()) & hmac.compare_digest(secret.encode(),password.encode())
-        except (ValueError,UnicodeError,binascii.Error):
-            pass
-        if not valid:
-            response=jsonify(error='Sign in to access AccountBrief.')
-            response.status_code=401
-            response.headers['WWW-Authenticate']='Basic realm="AccountBrief", charset="UTF-8"'
-            return response
-        return None
 
     @web.after_request
     def response_headers(response):

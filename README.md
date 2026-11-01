@@ -50,7 +50,7 @@ Open **http://127.0.0.1:8765**. Keep the terminal running; stop with Ctrl+C. For
 python3 app.py --port 8766
 ```
 
-Local startup defaults to `127.0.0.1:8765`. On Render, the app binds to `0.0.0.0` and the assigned `PORT`, uses Waitress, requires reviewer credentials and trusts only the HTTPS scheme from Render's proxy. Use `render.yaml` in this directory for a Render Blueprint deployment. Make `accountbrief/` your Git repository root and leave Render’s Root Directory empty. The blueprint intentionally has no `rootDir` setting.
+Local startup defaults to `127.0.0.1:8765`. On Render, the app binds to `0.0.0.0` and the assigned `PORT`, uses Waitress, provides public access without a login and trusts only the HTTPS scheme from Render's proxy. Use `render.yaml` in this directory for a Render Blueprint deployment. Make `accountbrief/` your Git repository root and leave Render’s Root Directory empty. The blueprint intentionally has no `rootDir` setting.
 
 ## Use
 
@@ -108,7 +108,7 @@ python3 app.py --input request.json --output brief.json
 
 Expected output: JSON containing `status`, `coverage`, explained `fit` entries, source `evidence`, `hypothesis`, `unknowns`, `outreach_draft`, `warnings`, `trace`, `model_requests` and a rendered `markdown` report. Live evidence and coverage vary by site and model response. Invalid input exits with code 2.
 
-- `GET /api/health`: public, minimal process health (`{"ok": true}`); reveals no key/configuration values. Other routes require credentials when access protection is enabled.
+- `GET /api/health`: public, minimal process health (`{"ok": true}`); reveals no key/configuration values. Pages and research routes are public; no reviewer username/password is required.
 - `POST /api/research`: accepts the same JSON input. `mode` may be omitted or set to `gemini`; other modes are rejected.
 - `workflow` defaults to `agent`. An explicit `efficient` backend alternative performs local source selection and one AI assessment; the website uses the agent.
 - Malformed input returns HTTP 400. Provider failures return a structured result with `status: Research unavailable` and `service_error`; the UI shows the error instead of a fit assessment.
@@ -118,7 +118,7 @@ Expected output: JSON containing `status`, `coverage`, explained `fit` entries, 
 | Path | Purpose |
 |---|---|
 | `app.py` | CLI/startup, retrieval, agent, validation and exports |
-| `server.py` | Flask routes, reviewer authentication, request controls and Waitress serving |
+| `server.py` | Flask routes, request controls and Waitress serving |
 | `static/` | Browser interface: HTML, CSS and JavaScript |
 | `tests/` | Automated tests |
 | `tests/fixtures/` | Test-only fictional webpages and request data; never loaded by the application |
@@ -134,7 +134,7 @@ python3 -m unittest discover -s tests -v
 
 Tests mock webpage retrieval/provider responses; running the suite does not consume Gemini quota. Coverage includes normal/sparse/invalid cases, adaptive tool calls, exact evidence IDs, targeted source selection, outreach safeguards, request budgets/pacing, TLS errors, quota/provider failures and bounded 503 retry. The application has also completed approved live Atlassian research runs; that does not establish future model availability or output accuracy.
 
-Public retrieval requires same-host HTTP(S) URLs, public DNS destinations, verified TLS and robots permission. Cross-host redirects, login/paywall pages and JavaScript-only content are not supported. Render production mode requires a 12+ character `ACCESS_PASSWORD` and the Gemini key. A single in-process research gate prevents concurrent model runs; `MAX_DAILY_RESEARCH` defaults to 20 research attempts per UTC day in production. This allowance is in-memory and resets on server restart, redeploy or free-service sleep/restart; it is not an account-wide or persistent spending cap. Invalid input is rejected before allowance consumption. Valid research attempts count even if provider/retrieval fails. A multi-instance deployment would require shared quota storage. No deployment or push is performed by these configuration files.
+Public retrieval requires same-host HTTP(S) URLs, public DNS destinations, verified TLS and robots permission. Cross-host redirects, login/paywall pages and JavaScript-only content are not supported. Render production mode requires the Gemini key, but no access username or password. A single in-process research gate prevents concurrent model runs; `MAX_DAILY_RESEARCH` defaults to 20 research attempts per UTC day in production. This allowance is in-memory and resets on server restart, redeploy or free-service sleep/restart; it is not an account-wide or persistent spending cap. Invalid input is rejected before allowance consumption. Valid research attempts count even if provider/retrieval fails. A multi-instance deployment would require shared quota storage. No deployment or push is performed by these configuration files.
 
 ## References
 
@@ -144,4 +144,6 @@ Public retrieval requires same-host HTTP(S) URLs, public DNS destinations, verif
 
 ## Deployment verification
 
-84 tests pass, including authenticated/unauthenticated routes, Render HTTPS-origin handling, host validation, cross-site rejection, payload limits, concurrency and daily allowances, failure cleanup and environment-based binding. An actual local Waitress smoke test verified readiness, password gating, HTTPS headers and the static UI with a fake API key and no Gemini calls. The Render service itself has not yet been created or tested.
+84 tests pass, including public routes, Render HTTPS-origin handling, host validation, cross-site rejection, payload limits, concurrency and daily allowances, failure cleanup and environment-based binding. An actual local Waitress smoke test verified readiness, HTTPS headers and the static UI with a fake API key and no Gemini calls. The Render service itself has not yet been created or tested.
+
+Reviewer login has been removed. `ACCESS_USERNAME` and `ACCESS_PASSWORD` are not needed in Render; any old values are ignored. Anyone with the URL can use the app, subject to the shared research/request allowances. The Gemini key remains server-side.
