@@ -301,7 +301,7 @@ Public retrieval is restricted to the target hostname, public network destinatio
 
 ## AI use, checks and prior work
 
-Codex assisted problem framing, implementation, prompt iteration, test design, debugging and documentation. Its output was checked through executable tests, local server checks and live account-research runs. Validation caught and corrected issues including altered source quotations, navigation text being used as evidence, inappropriate outreach assumptions and provider connection failures.
+I chose GTM account research because of my interest in revenue workflows and agentic AI. I used Codex to brainstorm and refine problem options, assist implementation, iterate prompts, develop tests, debug issues, and prepare documentation. Its output was checked through executable tests, local server checks and live account-research runs. Validation caught and corrected issues including altered source quotations, navigation text being used as evidence, inappropriate outreach assumptions and provider connection failures.
 
 The application was built in an empty workspace; no prior candidate application, proprietary customer dataset or existing candidate codebase was reused. Standard libraries and third-party Flask/Waitress dependencies were used. Official Gemini and Render documentation informed the integrations. Synthetic company content is confined to automated test fixtures. Source provenance checks do not eliminate incorrect inference, so fit judgments and drafts require review.
 
