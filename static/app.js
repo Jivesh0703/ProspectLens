@@ -252,26 +252,95 @@ function attachSalesforceReview(result) {
  if(!result.outreach_draft) return;
  const section=document.createElement('div');
  section.className='saved-tools';
- section.innerHTML='<label><input id="review-confirm" type="checkbox" class="review-checkbox"> I reviewed the evidence, fit, and outreach draft.</label><label for="salesforce-account">Salesforce Account ID</label><input id="salesforce-account" maxlength="18" placeholder="001…"><button id="salesforce-save" class="export" disabled>Save reviewed brief to Salesforce</button><p id="salesforce-save-status" class="help" role="status"></p>';
+ section.innerHTML='<h3>Save to Salesforce</h3><label><input id="review-confirm" type="checkbox" class="review-checkbox"> I reviewed the evidence, fit, and outreach draft.</label><label for="salesforce-search">Find the Salesforce account</label><div class="account-search-row"><input id="salesforce-search" type="search" maxlength="120" placeholder="Company name or website"><button id="salesforce-search-button" type="button" class="export">Search</button></div><p id="salesforce-search-status" class="help" role="status"></p><div id="salesforce-matches" class="account-matches" aria-label="Matching Salesforce accounts"></div><p id="salesforce-selection" class="help" role="status">Choose an account before saving.</p><button id="salesforce-save" class="export" disabled>Save reviewed brief to Salesforce</button><p id="salesforce-save-status" class="help" role="status"></p>';
  $('#draft-section').append(section);
+ const search=$('#salesforce-search');
+ const searchButton=$('#salesforce-search-button');
+ const matchesElement=$('#salesforce-matches');
+ const searchStatus=$('#salesforce-search-status');
+ const selection=$('#salesforce-selection');
+ const review=$('#review-confirm');
  const button=$('#salesforce-save');
- if(result.salesforce_task) $('#salesforce-save-status').textContent='Already saved as task '+result.salesforce_task+'.';
- $('#review-confirm').addEventListener('change',()=>{button.disabled=!$('#review-confirm').checked || Boolean(result.salesforce_task);});
+ const saveStatus=$('#salesforce-save-status');
+ let matches=[];
+ let selected=null;
+ let searchVersion=0;
+ let saving=false;
+ let uncertain=false;
+ const updateSave=()=>{button.disabled=!review.checked || !selected || saving || uncertain || Boolean(result.salesforce_task);};
+ if(result.salesforce_task) saveStatus.textContent='Already saved as task '+result.salesforce_task+'.';
+ function showMatches() {
+  matchesElement.innerHTML=matches.map(account=>`<button type="button" class="account-match ${selected?.id===account.id?'selected':''}" data-account-id="${escapeHtml(account.id)}" aria-pressed="${selected?.id===account.id}" ${saving?'disabled':''}><span><strong>${escapeHtml(account.name)}</strong><small>${escapeHtml(account.website || 'Website not provided')}</small></span><span aria-hidden="true">${selected?.id===account.id?'✓':'＋'}</span></button>`).join('');
+ }
+ async function searchAccounts() {
+  if(saving) return;
+  const version=++searchVersion;
+  selected=null; matches=[]; showMatches(); updateSave();
+  selection.textContent='Choose an account before saving.';
+  const query=search.value.trim();
+  if(query.length<2 || query.length>120) {searchStatus.textContent='Enter a company name or website of 2–120 characters.';return;}
+  searchButton.disabled=true;
+  searchStatus.textContent='Searching your Salesforce accounts…';
+  try {
+   const response=await fetch('/api/salesforce/accounts?'+new URLSearchParams({q:query}));
+   const data=await response.json();
+   if(version!==searchVersion) return;
+   if(!response.ok) throw new Error(data.error || 'Account search failed.');
+   matches=data.accounts;
+   if(!Array.isArray(matches)) throw new Error('Account search returned an invalid response.');
+   showMatches();
+   if(matches.length) {
+    searchStatus.textContent=matches.length+' matching account'+(matches.length===1?'':'s')+'. Confirm the company name and website.';
+   } else {
+    searchStatus.textContent='No matching accounts. Try another company name or website.';
+    const url=new URL(data.create_url);
+    if(url.protocol==='https:' && url.hostname.endsWith('.salesforce.com')) {
+     matchesElement.innerHTML=`<a class="source" href="${escapeHtml(url.href)}" target="_blank" rel="noopener noreferrer">Create an account in Salesforce ↗</a><p class="help">Return here and search again after creating the account.</p>`;
+    }
+   }
+  } catch(error) {
+   if(version===searchVersion) searchStatus.textContent=error.message;
+  } finally {if(version===searchVersion) searchButton.disabled=false;}
+ }
+ review.addEventListener('change',updateSave);
+ search.addEventListener('input',()=>{
+  searchVersion++; selected=null; matches=[]; showMatches(); updateSave();
+  searchButton.disabled=false;
+  searchStatus.textContent='Search to find matching accounts.';
+  selection.textContent='Choose an account before saving.';
+ });
+ search.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();searchAccounts();}});
+ searchButton.addEventListener('click',searchAccounts);
+ matchesElement.addEventListener('click',event=>{
+  const match=event.target.closest('[data-account-id]');
+  if(!match || saving) return;
+  selected=matches.find(account=>account.id===match.dataset.accountId) || null;
+  selection.textContent=selected?'Selected account: '+selected.name+' · '+(selected.website || 'Website not provided'):'Choose an account before saving.';
+  showMatches(); updateSave();
+ });
  button.addEventListener('click',async()=>{
-  button.disabled=true;
+  if(!selected || !review.checked || saving || uncertain || result.salesforce_task) return;
+  saving=true; uncertain=true; updateSave(); search.disabled=true; searchButton.disabled=true; showMatches();
+  saveStatus.textContent='Saving reviewed research to '+selected.name+'…';
   try {
    const brief={account:result.account,hypothesis:result.hypothesis,outreach_draft:result.outreach_draft,evidence:result.evidence};
-   const response=await fetch('/api/salesforce/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_id:$('#salesforce-account').value.trim(),reviewed:$('#review-confirm').checked,brief})});
+   const response=await fetch('/api/salesforce/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({account_id:selected.id,reviewed:review.checked,brief})});
    const data=await response.json();
-   if(!response.ok) throw new Error(data.error || 'Salesforce save failed.');
+   if(!response.ok) {uncertain=response.status>=500;throw new Error(data.error || 'Salesforce save failed.');}
    result.salesforce_task=data.id;
+   uncertain=false;
    persistWorkspace();
-   $('#salesforce-save-status').textContent='Saved to Salesforce as task '+data.id+'.';
+   saveStatus.textContent='Saved to '+selected.name+' as task '+data.id+'.';
   } catch(error) {
-   $('#salesforce-save-status').textContent=error.message;
-   // An uncertain network outcome requires checking Salesforce before another attempt.
+   if(error instanceof TypeError) uncertain=true;
+   saveStatus.textContent=error.message;
+  } finally {
+   saving=false; search.disabled=false; searchButton.disabled=false;
+   showMatches(); updateSave();
   }
  });
+ search.value=String(result.account).replace(/\\/g,'').replace(/^www\./i,'');
+ return searchAccounts();
 }
 async function salesforceStatus() {
  try {

@@ -137,8 +137,9 @@ Use `https://test.salesforce.com` for a sandbox. In production, set `APP_ORIGIN`
 
 1. Click **Connect Salesforce** and authorize the app.
 2. Open a completed brief and review its evidence, fit, and draft.
-3. Check the review checkbox, enter the existing Salesforce Account ID (15 or 18 characters, starting `001`), and click **Save reviewed brief to Salesforce**.
-4. Verify the new activity on that Account. Task visibility in Salesforce may depend on the account activity filters.
+3. ProspectLens suggests accounts using the researched company website. Search by company name or website, compare the matching names and websites, and explicitly select the right account.
+4. Check the review checkbox and click **Save reviewed brief to Salesforce**. If there are no matches, use **Create an account in Salesforce**, then return and search again.
+5. Verify the new activity on that Account. Task visibility in Salesforce may depend on the account activity filters.
 
 Salesforce API access and Task permissions are required. Org-specific validation rules or required custom fields can reject a save. The implementation uses REST API v61.0. Client credentials stay on the server. The user's access token is held in a signed HttpOnly, SameSite cookie, with Secure enabled in production and a one-hour application session. Flask session cookies are signed, not encrypted. Tokens are excluded from JavaScript responses and saved research. Reconnect when the Salesforce session expires. Disconnect clears the local session; revoke the app in Salesforce to remove its authorization.
 
@@ -201,6 +202,7 @@ Python tests mock provider/retrieval traffic and Salesforce requests. They exerc
 | `GET /api/salesforce/connect` | Start Salesforce authorization |
 | `GET /api/salesforce/callback` | Validate OAuth state and exchange the authorization code |
 | `POST /api/salesforce/disconnect` | Clear this browser's Salesforce session |
+| `GET /api/salesforce/accounts?q=company` | Search up to 20 accessible Accounts by name or website |
 | `POST /api/salesforce/save` | Create a reviewed account task for the connected user |
 
 Research input errors return 400, non-JSON returns 415, oversized requests return 413, and usage rejections return 429. Provider failures return `service_error` in the research result. CRM writes require same-origin requests, an authorized session, an Account ID, a brief, and `reviewed: true`.
@@ -226,5 +228,5 @@ Research input errors return 400, non-JSON returns 415, oversized requests retur
 - Validate research quality and preparation time with sellers across varied accounts.
 - Add durable, authenticated workspace storage and shared usage enforcement.
 - Persist batch queues so work can resume after closing the browser.
-- Add account lookup and org-specific field mapping for Salesforce.
+- Add org-specific field mapping and richer account matching for Salesforce.
 - Improve source discovery for JavaScript-heavy sites and conflicting statements.

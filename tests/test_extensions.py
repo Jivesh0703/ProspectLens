@@ -127,6 +127,52 @@ class ExtensionTests(unittest.TestCase):
         self.assertIn('uncertain',response.json['error'])
         self.assertEqual(provider.call_count,1)
 
+    def test_account_search_auth_escaping_and_response(self):
+        from urllib.parse import parse_qs, urlsplit
+        client=self.web().test_client()
+        base='https://prospectlens.vercel.app'
+        self.assertEqual(client.get('/api/salesforce/accounts?q=Example',base_url=base).status_code,401)
+        with client.session_transaction(base_url=base) as session:
+            session['sf_token']='test-token';session['sf_instance']='https://org.my.salesforce.com'
+        record={'Id':'001000000000001','Name':"O'Reilly Demo",'Website':'https://example.com','attributes':{'secret':'excluded'}}
+        with patch('salesforce.salesforce_request',return_value={'records':[record]}) as provider:
+            response=client.get('/api/salesforce/accounts',query_string={'q':"O'Reilly_%"},base_url=base)
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(response.json['accounts'],[{'id':record['Id'],'name':record['Name'],'website':record['Website']}])
+        self.assertEqual(response.json['create_url'],'https://org.my.salesforce.com/lightning/o/Account/new')
+        query=parse_qs(urlsplit(provider.call_args.args[0]).query)['q'][0]
+        self.assertIn("O\\'Reilly\\_\\%",query)
+        self.assertTrue(query.endswith('LIMIT 20'))
+        self.assertEqual(provider.call_args.kwargs['headers']['Authorization'],'Bearer test-token')
+
+    def test_account_search_rejects_bad_input_and_handles_expired_session(self):
+        from urllib.error import HTTPError
+        client=self.web().test_client()
+        base='https://prospectlens.vercel.app'
+        with client.session_transaction(base_url=base) as session:
+            session['sf_token']='test-token';session['sf_instance']='https://org.my.salesforce.com'
+        with patch('salesforce.salesforce_request') as provider:
+            for query in ('','x','x'*121,'bad\ninput'):
+                self.assertEqual(client.get('/api/salesforce/accounts',query_string={'q':query},base_url=base).status_code,400)
+            self.assertEqual(client.get('/api/salesforce/accounts?q=Example',base_url=base,headers={'Sec-Fetch-Site':'cross-site'}).status_code,403)
+            provider.assert_not_called()
+        with patch('salesforce.salesforce_request',side_effect=HTTPError('https://org.my.salesforce.com',401,'Expired',{},None)):
+            self.assertEqual(client.get('/api/salesforce/accounts?q=Example',base_url=base).status_code,401)
+        self.assertFalse(client.get('/api/salesforce/status',base_url=base).json['connected'])
+
+    def test_account_search_empty_results_and_service_failure(self):
+        client=self.web().test_client()
+        base='https://prospectlens.vercel.app'
+        with client.session_transaction(base_url=base) as session:
+            session['sf_token']='test-token';session['sf_instance']='https://org.my.salesforce.com'
+        with patch('salesforce.salesforce_request',return_value={'records':[]}):
+            response=client.get('/api/salesforce/accounts?q=Unknown',base_url=base)
+        self.assertEqual(response.json['accounts'],[])
+        with patch('salesforce.salesforce_request',side_effect=TimeoutError()):
+            response=client.get('/api/salesforce/accounts?q=Unknown',base_url=base)
+        self.assertEqual(response.status_code,502)
+        self.assertNotIn('test-token',response.get_data(as_text=True))
+
 
 if __name__=='__main__':
     unittest.main()

@@ -13,8 +13,8 @@ from urllib.request import Request, urlopen
 from flask import jsonify, redirect, request, session
 
 
-def salesforce_request(url, data, headers=None, form=False):
-    body=urlencode(data).encode() if form else json.dumps(data).encode()
+def salesforce_request(url, data=None, headers=None, form=False):
+    body=None if data is None else (urlencode(data).encode() if form else json.dumps(data).encode())
     req=Request(url,data=body,headers={'Content-Type':'application/x-www-form-urlencoded' if form else 'application/json',**(headers or {})})
     with urlopen(req,timeout=20) as response:
         return json.load(response)
@@ -105,6 +105,38 @@ def register_salesforce(web,settings,origins):
             return jsonify(error='Origin mismatch.'),403
         session.clear()
         return jsonify(connected=False)
+
+    @web.get('/api/salesforce/accounts')
+    def accounts():
+        if request.headers.get('Sec-Fetch-Site')=='cross-site':
+            return jsonify(error='Cross-site requests are blocked.'),403
+        if not enabled or not session.get('sf_token'):
+            return jsonify(error='Connect Salesforce to search your accounts.'),401
+        term=request.args.get('q','').strip()
+        if not 2<=len(term)<=120 or any(ord(char)<32 for char in term):
+            return jsonify(error='Search with a company name or website of 2–120 characters.'),400
+        # Escape both SOQL string delimiters and LIKE wildcards as literal input.
+        escaped=term.replace('\\','\\\\').replace("'","\\'").replace('%','\\%').replace('_','\\_')
+        pattern="'%"+escaped+"%'"
+        query='SELECT Id, Name, Website FROM Account WHERE Name LIKE '+pattern+' OR Website LIKE '+pattern+' ORDER BY Name LIMIT 20'
+        try:
+            response=salesforce_request(session['sf_instance']+'/services/data/v61.0/query?'+urlencode({'q':query}),headers={'Authorization':'Bearer '+session['sf_token']})
+            records=response.get('records')
+            if not isinstance(records,list):
+                raise ValueError('Invalid account response.')
+            matches=[]
+            for record in records[:20]:
+                if not isinstance(record,dict) or not re.fullmatch(r'001[A-Za-z0-9]{12}(?:[A-Za-z0-9]{3})?',str(record.get('Id',''))) or not isinstance(record.get('Name'),str):
+                    raise ValueError('Invalid account record.')
+                matches.append({'id':record['Id'],'name':record['Name'],'website':record.get('Website') or ''})
+            return jsonify(accounts=matches,create_url=session['sf_instance']+'/lightning/o/Account/new')
+        except HTTPError as exc:
+            if exc.code==401:
+                session.clear()
+                return jsonify(error='Salesforce session expired. Connect again.'),401
+            return jsonify(error='Salesforce account search failed. Check Account read permissions and API access.'),502
+        except (URLError,OSError,ValueError,TypeError):
+            return jsonify(error='Could not search Salesforce accounts. Please try again.'),502
 
     @web.post('/api/salesforce/save')
     def save():

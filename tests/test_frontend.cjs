@@ -29,7 +29,7 @@ function harness({saved = {}, research, storageFailure = false} = {}) {
    values.set(key, value); writes.push(key);
   }},
   Option: function(text, value) { this.text = text; this.value = value; },
-  URL, Blob, crypto, console, setTimeout: () => {},
+  URL, URLSearchParams, Blob, crypto, console, setTimeout: () => {},
   fetch: async (url, options) => {
    if(url === '/api/salesforce/status') return {json: async () => ({configured: false, connected: false})};
    return research(url, options);
@@ -146,4 +146,42 @@ test('invalid batch makes no research request', async () => {
  await h.event('#batch-start','click');
  assert.equal(count,0);
  assert.match(h.element('#batch-status').textContent,/url column/);
+});
+
+test('Salesforce requires account selection and review, then saves the selected ID', async () => {
+ const requests=[];
+ const h=harness({research:async(url,options)=>{
+  requests.push({url,options});
+  if(url.startsWith('/api/salesforce/accounts?')) return {ok:true,status:200,json:async()=>({accounts:[{id:'001000000000001',name:'Example Demo',website:'https://example.com'}]})};
+  return {ok:true,status:201,json:async()=>({id:'00T000000000001'})};
+ }});
+ await h.evaluate(`attachSalesforceReview(${JSON.stringify(result('www.example.com'))})`);
+ assert.match(requests[0].url,/q=example.com/);
+ assert.equal(h.element('#salesforce-save').disabled,true);
+ h.element('#review-confirm').checked=true;
+ await h.event('#review-confirm','change');
+ assert.equal(h.element('#salesforce-save').disabled,true);
+ await h.event('#salesforce-matches','click',{target:{closest:()=>({dataset:{accountId:'001000000000001'}})}});
+ assert.equal(h.element('#salesforce-save').disabled,false);
+ await h.event('#salesforce-save','click');
+ assert.equal(JSON.parse(requests[1].options.body).account_id,'001000000000001');
+ assert.equal(h.element('#salesforce-save').disabled,true);
+});
+
+test('Salesforce unmatched account offers a create link and keeps save disabled', async () => {
+ const h=harness({research:async()=>({ok:true,status:200,json:async()=>({accounts:[],create_url:'https://org.my.salesforce.com/lightning/o/Account/new'})})});
+ await h.evaluate(`attachSalesforceReview(${JSON.stringify(result('example.com'))})`);
+ assert.match(h.element('#salesforce-matches').innerHTML,/Create an account in Salesforce/);
+ assert.equal(h.element('#salesforce-save').disabled,true);
+});
+
+test('editing account search clears the previous selection', async () => {
+ const h=harness({research:async()=>({ok:true,status:200,json:async()=>({accounts:[{id:'001000000000001',name:'Example',website:null}]})})});
+ await h.evaluate(`attachSalesforceReview(${JSON.stringify(result('example.com'))})`);
+ h.element('#review-confirm').checked=true;
+ await h.event('#salesforce-matches','click',{target:{closest:()=>({dataset:{accountId:'001000000000001'}})}});
+ assert.equal(h.element('#salesforce-save').disabled,false);
+ h.element('#salesforce-search').value='Another';
+ await h.event('#salesforce-search','input');
+ assert.equal(h.element('#salesforce-save').disabled,true);
 });
