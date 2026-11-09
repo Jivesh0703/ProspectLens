@@ -1,7 +1,7 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AccountBrief · Evidence before outreach</title><link rel="stylesheet" href="/style.css"><script defer src="/app.js"></script></head>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ProspectLens · Evidence before outreach</title><link rel="stylesheet" href="/style.css"><script defer src="/app.js"></script></head>
 <body>
-<header><a class="brand" href="/" aria-label="AccountBrief home"><span class="brand-mark">a<span>↗</span></span>AccountBrief<span class="version">RESEARCH WORKSPACE</span></a><span class="local"><span class="dot"></span>Account intelligence</span></header>
+<header><a class="brand" href="/" aria-label="ProspectLens home"><span class="brand-mark">p<span>↗</span></span>ProspectLens<span class="version">RESEARCH WORKSPACE</span></a><span class="local"><span class="dot"></span>Account intelligence</span></header>
 <main>
 <section class="intro"><div><p class="eyebrow">YOUR NEXT CONVERSATION STARTS HERE</p><h1>Know the account.<br><span>Earn the conversation.</span></h1><p class="lede">Turn a company website into a sourced account brief.<br>Find the fit. Question the assumptions. Prepare your outreach.</p></div><div class="intro-note"><span class="note-number">01 → 03</span><p>Research<br>Evidence<br>Human review</p><span class="note-label">From research to outreach</span></div></section>
 <div class="workspace">
@@ -11,8 +11,42 @@
 <label for="product">What do you sell?</label><textarea id="product" rows="4" minlength="20" maxlength="1200" required placeholder="Describe your product, who it helps, and the problem it solves."></textarea>
 <label for="criteria">Ideal customer criteria <span class="optional">one per line</span></label><textarea id="criteria" rows="3" required placeholder="B2B software companies&#10;Subscription business model&#10;International customers"></textarea>
 <button class="primary" id="run" type="submit">Build account brief <span>↗</span></button><p id="progress" role="status" class="help"></p><p id="error" role="alert" class="error" hidden></p>
-</form><div class="scope-note"><strong>Designed to stop short of guessing.</strong><p>Company statements stay separate from fit inferences and discovery hypotheses. Outreach is a draft for review.</p></div>
+</form>
+<div class="saved-tools">
+<label for="profile-name">Save your offering and criteria</label>
+<input id="profile-name" maxlength="80" placeholder="e.g. Subscription finance teams">
+<button class="export" id="save-profile" type="button">Save profile</button>
+<label for="profiles">Customer profiles</label>
+<select id="profiles"><option value="">Choose a saved profile</option></select>
+<button class="export" id="delete-profile" type="button">Delete selected profile</button>
+<p id="storage-status" class="help" role="status"></p>
+</div>
+<div class="saved-tools">
+<h3>Research a list</h3>
+<label for="batch-file">Company CSV <span class="optional">up to 20 accounts</span></label>
+<input id="batch-file" type="file" accept=".csv,text/csv">
+<p class="help">Use a <strong>url</strong> column. All rows use the offering and criteria above. Keep this tab open while the queue runs.</p>
+<button class="export" id="batch-start" type="button">Run batch</button>
+<button class="export" id="batch-stop" type="button" disabled>Pause after current account</button>
+<button class="export" id="batch-export" type="button">Download batch CSV</button>
+<p id="batch-status" class="help" role="status"></p>
+<div id="batch-results"></div>
+</div>
+<div class="saved-tools">
+<h3>Salesforce</h3>
+<a class="source" href="/api/salesforce/connect">Connect Salesforce</a>
+<button class="export" id="salesforce-disconnect" type="button">Disconnect</button>
+<p id="salesforce-status" class="help" role="status"></p>
+</div>
+<div class="saved-tools">
+<h3>Saved briefs</h3>
+<label for="history-search">Find an account</label>
+<input id="history-search" type="search" placeholder="Search company or criterion">
+<div id="history-list"></div>
+<p class="help">The latest 30 briefs and your profiles are saved in this browser. Clearing browser data removes them. Download briefs to keep a separate copy.</p>
+</div>
+<div class="scope-note"><strong>Designed to stop short of guessing.</strong><p>Company statements stay separate from fit inferences and discovery hypotheses. Outreach is a draft for review.</p></div>
 </aside>
 <section id="output" class="results" aria-live="polite"><div class="panel empty"><div class="empty-icon">⌕</div><p class="eyebrow">EVIDENCE BEFORE OUTREACH</p><h2>A useful brief, not another<br>confident guess.</h2><p>Enter a company website and your offering to find relevant evidence and prepare your next conversation.</p><div class="empty-steps"><span><b>1</b> Inspect public pages</span><span><b>2</b> Check source quotes</span><span><b>3</b> Prepare a reviewable draft</span></div><div class="empty-bottom">Source-linked insights <span>·</span> Clear next steps <span>·</span> Reviewed by you</div></div></section>
-</div><footer><span>AccountBrief / Account intelligence</span><span>Built for thoughtful GTM teams.</span></footer>
+</div><footer><span>ProspectLens / Account intelligence</span><span>Built for thoughtful GTM teams.</span></footer>
 </main></body></html>

@@ -1,4 +1,4 @@
-"""Production HTTP surface for AccountBrief; research logic stays in app.py."""
+"""Production HTTP surface for ProspectLens; research logic stays in app.py."""
 from __future__ import annotations
 import datetime as dt
 import os
@@ -39,7 +39,8 @@ def create_app(settings=None, research_runner=None):
     else:
         settings=dict(settings)
     on_render=settings.get('RENDER','').lower()=='true'
-    production=on_render or settings.get('APP_ENV')=='production'
+    on_vercel=settings.get('VERCEL')=='1'
+    production=on_render or on_vercel or settings.get('APP_ENV')=='production'
     if production and not settings.get('GEMINI_API_KEY','').strip():
         raise ValueError('Production requires GEMINI_API_KEY.')
     try:
@@ -54,7 +55,15 @@ def create_app(settings=None, research_runner=None):
     render_host=settings.get('RENDER_EXTERNAL_HOSTNAME','')
     origins=set()
     hosts=set()
-    for origin in (explicit_origin,render_origin):
+    vercel_origins=[]
+    if on_vercel:
+        for key in ('VERCEL_URL','VERCEL_PROJECT_PRODUCTION_URL'):
+            hostname=settings.get(key,'')
+            if hostname:
+                if '/' in hostname or ':' in hostname or any(c.isspace() for c in hostname):
+                    raise ValueError('Invalid Vercel hostname metadata.')
+                vercel_origins.append('https://'+hostname)
+    for origin in (explicit_origin,render_origin,*vercel_origins):
         if origin:
             parsed=urlsplit(origin)
             if parsed.scheme not in ('http','https') or not parsed.hostname or parsed.username or parsed.password or parsed.path not in ('','/') or parsed.query or parsed.fragment or (production and parsed.scheme!='https'):
@@ -66,17 +75,20 @@ def create_app(settings=None, research_runner=None):
         hosts.add(render_host)
         origins.add('https://'+render_host)
     if production and not hosts:
-        raise ValueError('Production requires Render hostname metadata or APP_ORIGIN.')
+        raise ValueError('Production requires hosting hostname metadata or APP_ORIGIN.')
     if not production:
         hosts.update(('localhost','127.0.0.1','[::1]'))
     web=Flask(__name__,static_folder=None)
     web.config.update(MAX_CONTENT_LENGTH=12000,TRUSTED_HOSTS=sorted(hosts),PRODUCTION=production,ON_RENDER=on_render)
-    if on_render:
-        # Render supplies the last X-Forwarded-Proto value. Do not trust forwarded Host/IP.
+    if on_render or on_vercel:
+        # The hosting proxy supplies the last X-Forwarded-Proto value. Do not trust forwarded Host/IP.
         web.wsgi_app=ProxyFix(web.wsgi_app,x_for=0,x_proto=1,x_host=0,x_port=0,x_prefix=0)
     gate=ResearchGate(daily_limit)
     web.extensions['research_gate']=gate
     runner=research_runner or core.run
+
+    from salesforce import register_salesforce
+    register_salesforce(web,settings,origins)
 
     @web.after_request
     def response_headers(response):
@@ -148,5 +160,5 @@ def serve_app(web,host,port):
     serve(web,host=host,port=port,threads=4,connection_limit=64,
           max_request_body_size=12000,max_request_header_size=16384,
           channel_timeout=240,expose_tracebacks=False,
-          # Let only the explicitly configured ProxyFix consume Render's proto header.
+          # Let only the explicitly configured hosting ProxyFix consume the proto header.
           clear_untrusted_proxy_headers=not web.config['ON_RENDER'])

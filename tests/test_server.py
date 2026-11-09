@@ -11,8 +11,8 @@ import app as core
 
 REQUEST={'url':'https://example.com/','product':'We help finance teams match invoice payments.','criteria':['B2B software company']}
 PRODUCTION={'RENDER':'true','APP_ENV':'production','GEMINI_API_KEY':'test-not-a-real-key',
- 'RENDER_EXTERNAL_HOSTNAME':'accountbrief.onrender.com',
- 'RENDER_EXTERNAL_URL':'https://accountbrief.onrender.com','MAX_DAILY_RESEARCH':'2'}
+ 'RENDER_EXTERNAL_HOSTNAME':'prospectlens.onrender.com',
+ 'RENDER_EXTERNAL_URL':'https://prospectlens.onrender.com','MAX_DAILY_RESEARCH':'2'}
 
 class ServerTests(unittest.TestCase):
     def make(self,settings=None,runner=None):
@@ -20,32 +20,32 @@ class ServerTests(unittest.TestCase):
         web.config['TESTING']=True
         return web
     def post(self,client,**kwargs):
-        headers={'Origin':'https://accountbrief.onrender.com','X-Forwarded-Proto':'https',**kwargs.pop('headers',{})}
-        return client.post('/api/research',json=kwargs.pop('json',REQUEST),base_url='http://accountbrief.onrender.com',headers=headers,**kwargs)
+        headers={'Origin':'https://prospectlens.onrender.com','X-Forwarded-Proto':'https',**kwargs.pop('headers',{})}
+        return client.post('/api/research',json=kwargs.pop('json',REQUEST),base_url='http://prospectlens.onrender.com',headers=headers,**kwargs)
     def test_health_public_and_does_not_reveal_key_configuration(self):
-        response=self.make().test_client().get('/api/health',base_url='http://accountbrief.onrender.com')
+        response=self.make().test_client().get('/api/health',base_url='http://prospectlens.onrender.com')
         self.assertEqual(response.status_code,200)
         self.assertEqual(response.json,{'ok':True})
     def test_assets_and_research_are_public_without_login(self):
         client=self.make().test_client()
         for path in ('/','/app.js','/style.css'):
-            with client.get(path,base_url='http://accountbrief.onrender.com') as response:
+            with client.get(path,base_url='http://prospectlens.onrender.com') as response:
                 self.assertEqual(response.status_code,200)
                 self.assertNotIn('WWW-Authenticate',response.headers)
         self.assertEqual(self.post(client).status_code,200)
     def test_legacy_auth_configuration_cannot_enable_a_login_gate(self):
         web=self.make({**PRODUCTION,'ACCESS_USERNAME':'reviewer','ACCESS_PASSWORD':'old-test-password'})
-        with web.test_client().get('/',base_url='http://accountbrief.onrender.com') as response:
+        with web.test_client().get('/',base_url='http://prospectlens.onrender.com') as response:
             self.assertEqual(response.status_code,200)
             self.assertNotIn('WWW-Authenticate',response.headers)
     def test_public_assets_served_and_secret_files_not_exposed(self):
         client=self.make().test_client()
-        response=client.get('/',base_url='http://accountbrief.onrender.com',headers={})
+        response=client.get('/',base_url='http://prospectlens.onrender.com',headers={})
         self.assertEqual(response.status_code,200)
-        self.assertIn(b'AccountBrief',response.data)
+        self.assertIn(b'ProspectLens',response.data)
         response.close()
         for path in ('/.env','/app.py','/server.py','/../.env'):
-            response=client.get(path,base_url='http://accountbrief.onrender.com',headers={})
+            response=client.get(path,base_url='http://prospectlens.onrender.com',headers={})
             self.assertEqual(response.status_code,404)
     def test_render_https_origin_passes_proxy_check(self):
         response=self.post(self.make().test_client())
@@ -59,11 +59,11 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.post(client,headers={'Origin':'null'}).status_code,403)
     def test_untrusted_host_cannot_use_forwarded_host_to_bypass(self):
         client=self.make().test_client()
-        response=client.get('/api/health',base_url='http://evil.example',headers={'X-Forwarded-Host':'accountbrief.onrender.com'})
+        response=client.get('/api/health',base_url='http://evil.example',headers={'X-Forwarded-Host':'prospectlens.onrender.com'})
         self.assertEqual(response.status_code,400)
     def test_daily_limit_bounds_runs_and_health_does_not_consume_it(self):
         web=self.make();client=web.test_client()
-        for _ in range(3): client.get('/api/health',base_url='http://accountbrief.onrender.com')
+        for _ in range(3): client.get('/api/health',base_url='http://prospectlens.onrender.com')
         self.assertEqual(self.post(client).status_code,200)
         self.assertEqual(self.post(client).status_code,200)
         blocked=self.post(client)
@@ -78,14 +78,14 @@ class ServerTests(unittest.TestCase):
     def test_invalid_input_and_large_body_do_not_consume_research_allowance(self):
         web=self.make();client=web.test_client()
         self.assertEqual(self.post(client,json={}).status_code,400)
-        response=client.post('/api/research',data='x'*12001,content_type='application/json',base_url='http://accountbrief.onrender.com',headers={})
+        response=client.post('/api/research',data='x'*12001,content_type='application/json',base_url='http://prospectlens.onrender.com',headers={})
         self.assertEqual(response.status_code,413)
         self.assertEqual(web.extensions['research_gate'].used,0)
     def test_wrong_content_type_and_malformed_json_rejected(self):
         client=self.make().test_client()
         headers={}
-        self.assertEqual(client.post('/api/research',data='text',base_url='http://accountbrief.onrender.com',headers=headers).status_code,415)
-        self.assertEqual(client.post('/api/research',data='{',content_type='application/json',base_url='http://accountbrief.onrender.com',headers=headers).status_code,400)
+        self.assertEqual(client.post('/api/research',data='text',base_url='http://prospectlens.onrender.com',headers=headers).status_code,415)
+        self.assertEqual(client.post('/api/research',data='{',content_type='application/json',base_url='http://prospectlens.onrender.com',headers=headers).status_code,400)
     def test_only_one_research_runs_while_health_remains_available(self):
         entered=threading.Event();release=threading.Event();results=[]
         def runner(data):
@@ -96,7 +96,7 @@ class ServerTests(unittest.TestCase):
         try:
             self.assertTrue(entered.wait(2))
             self.assertEqual(self.post(web.test_client()).status_code,429)
-            self.assertEqual(web.test_client().get('/api/health',base_url='http://accountbrief.onrender.com').status_code,200)
+            self.assertEqual(web.test_client().get('/api/health',base_url='http://prospectlens.onrender.com').status_code,200)
         finally:
             release.set();worker.join(3)
         self.assertEqual(results[0].status_code,200)

@@ -17,6 +17,8 @@ SAMPLE = json.loads((Path(__file__).parent/'fixtures/request.json').read_text())
 
 class WorkflowTests(unittest.TestCase):
     def setUp(self):
+        env=patch.dict(os.environ,{'GEMINI_FALLBACK_MODELS':''})
+        env.start();self.addCleanup(env.stop)
         self.real_pacer=app.pace_provider
         pacer=patch('app.pace_provider',side_effect=lambda timeout:timeout)
         pacer.start();self.addCleanup(pacer.stop)

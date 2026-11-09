@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AccountBrief: bounded account research with evidence validation. Standard-library research core."""
+"""ProspectLens: bounded account research with evidence validation. Standard-library research core."""
 from __future__ import annotations
 import argparse
 import codecs
@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parent
 MAX_PAGES, MAX_CALLS, MAX_TURNS = 4, 10, 3
 MAX_SECONDS = 180
 MODEL_TIMEOUT_SECONDS = 90
-USER_AGENT = 'AccountBrief/0.1 (+local research prototype)'
+USER_AGENT = 'ProspectLens/0.1 (+local research prototype)'
 ROLES = ['Finance leader', 'Revenue operations leader', 'Sales leader', 'Operations leader']
 
 class InputError(ValueError):
@@ -61,7 +61,7 @@ def load_env(path=None):
             continue
         key, separator, value = line.partition('=')
         key, value = key.strip(), value.strip()
-        if not separator or key not in ('GEMINI_API_KEY', 'GEMINI_MODEL', 'GEMINI_RPM', 'ACCESS_USERNAME', 'ACCESS_PASSWORD', 'MAX_DAILY_RESEARCH', 'APP_ENV', 'APP_ORIGIN', 'HOST', 'PORT'):
+        if not separator or key not in ('GEMINI_API_KEY', 'GEMINI_MODEL', 'GEMINI_FALLBACK_MODELS', 'SALESFORCE_CLIENT_ID', 'SALESFORCE_CLIENT_SECRET', 'SALESFORCE_LOGIN_URL', 'SESSION_SECRET', 'GEMINI_RPM', 'ACCESS_USERNAME', 'ACCESS_PASSWORD', 'MAX_DAILY_RESEARCH', 'APP_ENV', 'APP_ORIGIN', 'HOST', 'PORT'):
             raise InputError(f'Invalid .env setting on line {number}; use a setting listed in .env.example.')
         if value.startswith(('"', "'")):
             if len(value) < 2 or value[-1] != value[0]:
@@ -212,7 +212,7 @@ def direct_support(criterion, quotes):
     """Conservative lexical guard for common ICP categories, not semantic proof."""
     text=' '.join(quotes).lower();kind=criterion_kind(criterion)
     if kind=='pricing':
-        return bool(re.search(r'\b(subscription|subscriptions|monthly|annual|annually|recurring|billed|per month|per year)\b',text))
+        return any(bool(re.search(r'\b(subscriptions?|recurring billing|billed|per month|per year)\b',quote.lower()) or (re.search(r'\b(monthly|annual|annually|recurring)\b',quote.lower()) and re.search(r'\b(billing|payments?|plans?|pricing|renewals?|fees?|orders?)\b|[$€£]',quote.lower()))) and not re.search(r'newsletter|blog digest',quote,re.I) for quote in quotes)
     if kind=='international':
         return bool(re.search(r'\b(customers?|clients?|businesses|companies|organizations?|teams)\b',text) and re.search(r'countries|worldwide|globally|around the world|across the globe|international|across.+(?:europe|asia|america)',text))
     if kind=='product':
@@ -418,6 +418,7 @@ class Research:
         self.finished = None
         self.service_error = None
         self.model_requests = 0
+        self.models_used = []
         self.snippets = {}
     def event(self, tool, args, status, detail):
         self.trace.append({'step': len(self.trace) + 1, 'tool': tool, 'arguments': args,
@@ -612,7 +613,7 @@ class Research:
                   'coverage': {'supported': matches, 'total': len(self.data['criteria']), 'meaning': 'Evidence coverage, not win probability or a lead score.'},
                   **brief, 'question_adjusted':bool(adjusted), 'evidence': relevant_evidence, 'outreach_draft': draft,
                   'warnings': list(dict.fromkeys(self.warnings)), 'trace': self.trace,
-                  'pages_read': len(self.pages), 'tool_calls': self.calls, 'model_requests':self.model_requests,
+                  'pages_read': len(self.pages), 'tool_calls': self.calls, 'model_requests':self.model_requests, 'models_used':self.models_used,
                   'elapsed_seconds': round(time.monotonic()-self.started, 2),
                   'review_note': 'Review source relevance, hypothesis and wording before use. No email was sent; no CRM was changed.'}
         result['markdown'] = to_markdown(result)
@@ -620,7 +621,7 @@ class Research:
 
 
 def to_markdown(r):
-    lines = [f"# AccountBrief: {r['account']}", '', r['mode_notice'], '', f"**Decision:** {r['status']}",
+    lines = [f"# ProspectLens: {r['account']}", '', r['mode_notice'], '', f"**Decision:** {r['status']}",
              f"**Coverage:** {r['coverage']['supported']}/{r['coverage']['total']} criteria. {r['coverage']['meaning']}", '', '## Fit assessment (inferences)']
     lines += [f"- {x['criterion']}: {x['status']} ({', '.join(x['evidence_ids']) or 'no evidence'}). {x.get('reason','')}" for x in r['fit']]
     lines += ['', '## Evidence (company statements, not independent verification)']
@@ -689,7 +690,9 @@ def post_json(url, body, headers=None, timeout=MODEL_TIMEOUT_SECONDS):
             429: 'Gemini quota or rate limit reached. Check your account quota and try again later.'
         }
         error_type = RetryableProviderError if exc.code in (502, 503, 504) else InputError
-        raise error_type(reasons.get(exc.code, f'Gemini returned HTTP {exc.code}. Try again later.')) from exc
+        error=error_type(reasons.get(exc.code, f'Gemini returned HTTP {exc.code}. Try again later.'))
+        error.status_code=exc.code
+        raise error from exc
     except (URLError, OSError) as exc:
         reason = exc.reason if isinstance(exc, URLError) else exc
         if isinstance(reason, ssl.SSLCertVerificationError):
@@ -785,7 +788,7 @@ def run_gemini(research, transport=post_json):
 
 
 def run_efficient(research, transport=post_json):
-    """Fetch up to three pages locally, then make at most one model request."""
+    """Fetch up to three pages locally, then request one assessment with bounded model failover."""
     key = os.getenv('GEMINI_API_KEY')
     if not key:
         raise InputError('GEMINI_API_KEY is not configured. Add your key to .env and restart.')
@@ -870,9 +873,47 @@ Include actual need, budget and timing among unknowns. Finish with submit_resear
         raise InputError('Gemini returned an invalid assessment: '+submitted['error'])
 
 
+def routed_transport(research, transport):
+    """Try configured models within the run's existing attempt and time budgets."""
+    primary=os.getenv('GEMINI_MODEL','gemini-3.5-flash-lite')
+    models=list(dict.fromkeys([primary]+[m.strip() for m in os.getenv('GEMINI_FALLBACK_MODELS','gemini-3.1-flash-lite').split(',') if m.strip()]))
+    if len(models)>3 or any(not re.fullmatch(r'[a-zA-Z0-9._-]+',m) for m in models):
+        raise InputError('Configure at most three valid Gemini model identifiers.')
+    index=0
+    def request_model(url, body, headers=None, timeout=MODEL_TIMEOUT_SECONDS):
+        nonlocal index
+        while True:
+            model=models[index]
+            research.models_used.append(model)
+            payload=dict(body)
+            payload['generationConfig']=generation_config(model)
+            if index and research.data['workflow']=='agent':
+                # Model-specific thought signatures cannot be carried between models.
+                payload['contents']=[{'role':'user','parts':[{'text':json.dumps({
+                    'offering':research.data['product'],'criteria':research.data['criteria'],
+                    'retrieved_pages':[research.agent_page(p) for p in research.pages.values()],
+                    'instruction':'Use these retrieved snippets. Complete the brief with supplied IDs; do not refetch pages.'})}]}]
+            remaining=MAX_SECONDS-(time.monotonic()-research.started)
+            try:
+                return transport(f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',payload,headers,timeout=max(1,min(timeout,remaining)))
+            except InputError as exc:
+                eligible=isinstance(exc,(RetryableProviderError,ProviderBusyError)) or getattr(exc,'status_code',None) in (404,429,500,502,504)
+                remaining=MAX_SECONDS-(time.monotonic()-research.started)
+                if not eligible or index+1>=len(models) or research.model_requests>=MAX_TURNS or remaining<10:
+                    raise
+                if isinstance(exc,ProviderBusyError) and exc.retry_after>15:
+                    raise
+                old=model
+                index+=1
+                research.model_requests+=1
+                research.warnings.append(f'{old} was unavailable; switched to {models[index]} within the request budget.')
+    return request_model
+
+
 def run(data, transport=post_json):
     research = Research(data)
     try:
+        transport=routed_transport(research,transport)
         if research.data['workflow'] == 'agent':
             run_gemini(research, transport)
         else:
@@ -916,7 +957,7 @@ def main():
         parser.exit(2,'Install dependencies first: python -m pip install -r requirements.txt\n')
     except (ValueError,InputError) as exc:
         parser.exit(2,str(exc)+'\n')
-    print(f'AccountBrief listening on {host}:{port}',flush=True)
+    print(f'ProspectLens listening on {host}:{port}',flush=True)
     try:
         serve_app(web,host,port)
     except KeyboardInterrupt:

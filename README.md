@@ -1,26 +1,21 @@
-# AccountBrief
+# ProspectLens
 
-An AI account research agent for GTM teams. Enter a company website, your offering and ideal customer criteria. AccountBrief researches relevant pages and produces an evidence-backed fit assessment, a discovery question and a reviewable outreach draft.
+An agentic account research workspace for GTM and revenue teams. Research company websites against your ideal customer profile, inspect the source evidence, and prepare outreach for review. Save customer profiles, research a list of accounts, and attach reviewed briefs to Salesforce accounts.
 
-## Hosted use
+## Features
 
-Open the prototype link provided with the submission. Visitors need only a browser: no login, installation or personal Gemini API key is required.
+- **Evidence-backed account research.** Gemini selects relevant pages and source snippet IDs. Python resolves the IDs to the original text, validates references, and checks common fit categories.
+- **Reusable customer profiles.** Save your offering and fit criteria, then apply them to different accounts.
+- **Batch research.** Upload up to 20 company URLs in a CSV. Research runs sequentially and shows supported criteria, unknowns, and accounts needing manual review. Open individual briefs or download the batch summary.
+- **Saved briefs.** Search and reopen the latest 30 briefs in your browser, with original retrieval timestamps. Download Markdown or JSON for a separate copy.
+- **Salesforce integration.** Connect your Salesforce account through OAuth, review a brief, and save it as a completed task linked to an existing Account.
+- **Gemini model fallback.** Try configured alternative models after eligible provider failures within the same three-attempt research budget.
 
-The hosted application uses the owner's Gemini key, stored privately in Render's environment settings. Visitor research consumes the owner's shared quota. The key is never sent to the browser. Availability depends on the hosting service and Gemini's capacity and project quotas.
+## Run locally
 
-## Requirements and dependencies
+Use Python 3.10+ and a Gemini API key with access to the configured models. The deployment selects Python 3.13. Flask and Waitress dependencies are pinned in `requirements.txt`; the research core uses Python's standard library. Node.js is only needed for the frontend regression tests.
 
-For a local copy:
-
-- Python 3.10 or newer. Render is configured for Python 3.13.
-- Internet access and a browser.
-- A Gemini API key with access to the configured model.
-
-The research core uses Python's standard library. Flask serves the HTTP routes and Waitress runs the server. Exact dependency versions are pinned in `requirements.txt`. No frontend build, database or paid service is required; live research requires available Gemini API quota.
-
-## Local setup
-
-Run these commands from the repository root—the directory containing `app.py`:
+From the repository root, containing `app.py`:
 
 ```sh
 python3 -m venv .venv
@@ -28,27 +23,26 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-On Windows, activate the environment with `.venv\Scripts\activate` instead.
+On Windows, activate with `.venv\Scripts\activate`.
 
-If `.env` does not already exist, create it from the template:
+If you don't already have `.env`, copy the template:
 
 ```sh
 cp .env.example .env
 ```
 
-Do not overwrite an existing `.env` containing your key. Set its values:
+Set these values in `.env`:
 
 ```dotenv
-GEMINI_API_KEY=YOUR_GEMINI_KEY
+GEMINI_API_KEY=your_key
 GEMINI_MODEL=gemini-3.5-flash-lite
+GEMINI_FALLBACK_MODELS=gemini-3.1-flash-lite
 GEMINI_RPM=5
 MAX_DAILY_RESEARCH=20
 APP_ENV=development
 ```
 
-Set `GEMINI_RPM` to your model/project's actual requests-per-minute allowance; `5` is a configuration default, not a universal free-tier quota. The app loads `.env` automatically from the project directory. Existing process environment variables take precedence. Restart after changing settings.
-
-`.env` and `.venv/` are ignored by Git. Never commit your key or place it in frontend code.
+Model availability and quotas depend on your Google project. Set RPM to your actual allowance. An empty `GEMINI_FALLBACK_MODELS` disables fallback; at most three distinct models can be configured including the primary. Changing models does not increase your project's quota. Existing process environment variables override `.env`; restart after editing configuration.
 
 Start the application:
 
@@ -56,28 +50,13 @@ Start the application:
 python app.py
 ```
 
-Open **http://127.0.0.1:8765**. Keep the terminal running; stop with Ctrl+C. To choose another local port:
+Open [http://127.0.0.1:8765](http://127.0.0.1:8765). Stop with Ctrl+C. For another port, use `python app.py --port 8766`.
 
-```sh
-python app.py --port 8766
-```
+## Research an account
 
-## Core workflow
+Enter a public company URL, an offering of 20–1200 characters, and 1–5 unique criteria of 3–120 characters each. Build the brief, inspect the fit explanations and source excerpts, and review the discovery question and draft.
 
-1. Enter a real public company website.
-2. Describe your offering in 20–1200 characters.
-3. Enter 1–5 unique ideal customer criteria, one per line.
-4. Select **Build account brief**.
-5. Inspect the fit explanations, exact source quotes, unknowns and discovery question.
-6. Review the outreach draft and download the Markdown brief or JSON evidence record.
-
-Evidence coverage measures how many criteria have supporting evidence. It is not buying intent, a lead score or a forecast. **Unknown** means the inspected sources did not establish a criterion, not that the company is unsuitable.
-
-## Example input and expected output
-
-### Representative case
-
-Use the following in the browser, or save it as `request.json`:
+For example:
 
 ```json
 {
@@ -91,233 +70,161 @@ Use the following in the browser, or save it as `request.json`:
 }
 ```
 
-For the CLI:
+Expected output includes a fit entry for each criterion, exact quotations with source URLs and retrieval timestamps, a discovery question, unknowns, an outreach draft when evidence is sufficient, and the research activity. Coverage and wording vary with the website and model response. Subscription terms can support subscription pricing; reconciliation pain still needs discovery with the buyer. Unknown criteria reflect missing support in inspected pages.
+
+To use the CLI, save that JSON as `request.json`:
 
 ```sh
 python app.py --input request.json --output brief.json
 ```
 
-Expected behavior: the agent selects relevant product, pricing/licensing and customer sources, validates its evidence and returns a brief. In observed live runs, Atlassian's project-management tool description, monthly subscription terms and customer reach across 200+ countries supported all three criteria.
+For an invalid-input check, use `http://127.0.0.1/private`. The browser reports an input error, the API returns HTTP 400, and the CLI exits with code 2 before contacting Gemini. Provider failures return a research-unavailable result with `service_error`.
 
-An illustrative, shortened output based on those runs is:
+## Research a batch
 
-```json
-{
-  "account": "www.atlassian.com",
-  "status": "Review draft",
-  "coverage": {
-    "supported": 3,
-    "total": 3,
-    "meaning": "Evidence coverage, not win probability or a lead score."
-  },
-  "fit": [
-    {
-      "criterion": "B2B software company",
-      "status": "Evidence found - review relevance",
-      "evidence_ids": ["E1"],
-      "reason": "The cited page describes a project-management tool for teams."
-    },
-    {
-      "criterion": "Subscription pricing",
-      "status": "Evidence found - review relevance",
-      "evidence_ids": ["E2"],
-      "reason": "The cited licensing page explicitly describes monthly subscriptions."
-    },
-    {
-      "criterion": "International customers",
-      "status": "Evidence found - review relevance",
-      "evidence_ids": ["E4"],
-      "reason": "The customers page states that companies in 200+ countries and territories use Atlassian."
-    }
-  ],
-  "hypothesis": "Does your team reconcile subscription payments across currencies? If so, is matching those payments to invoices a challenge?",
-  "service_error": null
-}
+Save a CSV such as:
+
+```csv
+url
+https://www.atlassian.com/
+https://www.hubspot.com/
+https://www.gitlab.com/
 ```
 
-The full JSON also contains source quotations and URLs, retrieval timestamps, unknowns, the outreach draft, executed-tool trace, attempted model-request count and the rendered Markdown report. The example above omits those fields for readability. Source content, selected evidence IDs, wording, page count and coverage can vary between runs; **3/3 is an observed result, not a guaranteed output**.
+1. Enter or load your offering and criteria.
+2. Select the CSV under **Research a list** and click **Run batch**.
+3. Keep the tab open. Each account uses the same profile snapshot and runs as a separate request.
+4. Open completed briefs to inspect evidence, or download a CSV showing coverage, supported criteria, unknowns, and errors.
 
-A useful result may instead mark criteria unknown. If no criterion has relevant evidence, the expected result is **Needs manual research**, with the outreach draft withheld.
+The input accepts a `url` column, quoted CSV fields, and up to 20 rows in a file smaller than 100 KB. Duplicate normalized URLs are removed. Private destinations are rejected by the backend. A quota/concurrency rejection leaves the current account queued and pauses the batch. A provider/retrieval failure marks that account unavailable and pauses before the next account. Resume continues queued accounts; failed accounts can be researched individually.
 
-### Invalid-input case
+Pause finishes the current account before stopping. Completed briefs stay saved; the active queue stays in the current tab and is lost on reload. A batch of 20 accounts may need more than 20 Gemini requests, so plan for your free-tier request and daily quotas.
 
-Use the same offering and criteria, but change the URL to:
+## Saved workspace
+
+Profiles and briefs are stored in browser `localStorage` for this website origin. The workspace keeps up to 20 profiles and the latest 30 completed briefs. Saving the same profile name replaces its offering and criteria. Briefs with unknown findings are retained; service failures are excluded. Search the saved list by account or criterion, reopen a brief, or delete individual entries.
+
+Saved research is a snapshot; run it again to refresh sources. Clearing browser data removes it. Storage failures are shown in the interface and downloads remain available. Data does not sync between devices, browsers, localhost, preview deployments, or production domains. Earlier AccountBrief browser data is read on the same origin when present.
+
+## Connect Salesforce
+
+The integration uses the Salesforce OAuth authorization-code flow with PKCE. Each visitor connects their own Salesforce identity. Saving creates a **completed Task** on the selected Account, containing source quotes and URLs, the discovery question, and the outreach draft. Existing account fields are preserved.
+
+Create a Salesforce External Client App, or an existing Connected App, with OAuth web-server flow and API access (`api`). Set its exact callback URL to:
 
 ```text
-http://127.0.0.1/private
+https://your-project.vercel.app/api/salesforce/callback
 ```
 
-Expected behavior:
+For local development, register `http://127.0.0.1:8765/api/salesforce/callback` as an additional callback if your Salesforce configuration permits it.
 
-- The browser shows an input error and generates no brief.
-- The API returns HTTP 400 with:
+Set these server environment variables:
 
-```json
-{
-  "error": "Use a public http(s) website, without credentials or custom ports."
-}
+```dotenv
+SALESFORCE_CLIENT_ID=your_consumer_key
+SALESFORCE_CLIENT_SECRET=your_consumer_secret
+SALESFORCE_LOGIN_URL=https://login.salesforce.com
+SESSION_SECRET=your_stable_random_secret_of_at_least_32_characters
 ```
 
-- The CLI prints that validation error and exits with code `2`.
-- No Gemini request is made.
+Generate the session secret locally:
 
-### Provider failure
+```sh
+python -c 'import secrets; print(secrets.token_urlsafe(48))'
+```
 
-Unavailable Gemini service, quota exhaustion or a timeout does not become a negative account assessment. The response reports **Research unavailable**, includes `service_error`, and withholds the draft. The interface displays that error so the user can address it or retry later.
+Use `https://test.salesforce.com` for a sandbox. In production, set `APP_ORIGIN` to the deployment's exact HTTPS origin, especially for custom domains, and register the matching callback with Salesforce.
 
-## Sample data and automated tests
+1. Click **Connect Salesforce** and authorize the app.
+2. Open a completed brief and review its evidence, fit, and draft.
+3. Check the review checkbox, enter the existing Salesforce Account ID (15 or 18 characters, starting `001`), and click **Save reviewed brief to Salesforce**.
+4. Verify the new activity on that Account. Task visibility in Salesforce may depend on the account activity filters.
 
-Test data is included under `tests/fixtures/`:
+Salesforce API access and Task permissions are required. Org-specific validation rules or required custom fields can reject a save. The implementation uses REST API v61.0. Client credentials stay on the server. The user's access token is held in a signed HttpOnly, SameSite cookie, with Secure enabled in production and a one-hour application session. Flask session cookies are signed, not encrypted. Tokens are excluded from JavaScript responses and saved research. Reconnect when the Salesforce session expires. Disconnect clears the local session; revoke the app in Salesforce to remove its authorization.
 
-| File / case | Purpose and expected behavior |
-|---|---|
-| `request.json` | A fictional account research input used by tests |
-| `websites.json`: Meridian Cloud | Fictional software, recurring-billing and international-customer statements; supports the normal workflow |
-| `websites.json`: Quiet Company | A sparse coming-soon page; no supported criteria and no outreach draft |
-| `websites.json`: Juniper Studio | A pottery workshop without evidence for the software ICP; no relevant fit |
+A successful task ID is recorded on the saved brief to prevent another save through that view. CRM writes have no automatic retry. If a network error leaves the outcome uncertain, check Salesforce before trying again. Simultaneous saves from different tabs/devices are not deduplicated by a shared store.
 
-The `.example` URLs in these fixtures are fictional keys, not public websites. **Do not submit them to the live app.** Tests load these files and mock retrieval/provider responses; the application never loads them and has no demo or synthetic fallback mode.
+Without Salesforce configuration, research, profiles, history, and batch downloads remain available. OAuth and task creation have automated mocked tests; a live org must still be used to verify permissions and configuration.
 
-Run all tests with the virtual environment active:
+## Deploy on Vercel
+
+The suggested repository name is **`prospectlens`**. Use the directory containing `app.py`, `index.py`, `pyproject.toml`, and `vercel.json` as the repository root.
+
+1. Import the GitHub repository into Vercel.
+2. Select **Flask** as the framework. Leave Root Directory empty if the app is at the repository root. If the repository contains the `prospectlens/` folder, select that folder as Root Directory.
+3. Keep the framework's default build settings. The WSGI entrypoint is `index:app` in `pyproject.toml`.
+4. Add `GEMINI_API_KEY`, `GEMINI_MODEL`, `GEMINI_FALLBACK_MODELS`, `GEMINI_RPM`, `MAX_DAILY_RESEARCH`, and `APP_ENV=production` to the appropriate environment scopes.
+5. Add the Salesforce settings above if using CRM integration. Keep `SESSION_SECRET` stable across deployments. Set `APP_ORIGIN` for a custom domain or your canonical production URL.
+6. Deploy. Vercel supplies its deployment and production hostnames; the backend validates those hosts and same-origin research requests.
+7. Check `/api/health`, run one company, upload a small CSV, reopen a saved brief, test downloads, and complete Salesforce authorization and a reviewed save if configured.
+
+`vercel.json` sets the Python function duration to 300 seconds. The research core checks a 180-second run budget between operations. Enable Fluid compute and verify the project's function duration in Vercel. Network operations can add overhead beyond the core budget.
+
+Research is public and uses the owner's Gemini quota. No visitor Gemini key is needed. Rate limiting, concurrency, and daily allowances are **per process**. Vercel can start multiple instances; these counters do not enforce a project-wide daily cap. Use provider quotas for account-level limits. Persistent, distributed usage enforcement is a remaining scaling task.
+
+## Agent and fallback behavior
+
+Python retrieves the initial webpage. Gemini chooses up to three same-host follow-up pages through `research_pages`, then calls `complete_research` using IDs from the retrieved snippets. Python resolves those IDs, validates references and common-category evidence checks, and builds the brief and exports.
+
+The agent has at most four pages, ten tool actions, three model attempts, and a checked 180-second research budget. Model-facing excerpts are limited to 3000 characters per page. The normal agent path can finish in two model requests.
+
+Fallback tries configured models in order on model-not-found, rate-limit, transient server errors, or timeout when time and request budget remain. It rebuilds agent context from retrieved snippets to avoid transferring model-specific thought signatures. Authentication failures stop the run. A configured fallback can also be used by the `workflow: efficient` CLI/API path. All attempts share the three-request limit. Without a fallback, the agent retains its bounded short HTTP 503 retry. Long provider retry delays stop the run. JSON exports include `models_used` and fallback warnings.
+
+## Evidence quality and limitations
+
+Source IDs establish quote provenance; relevance still needs review. The common-category guard rejects weak matches such as an annual company event used to support subscription pricing. The regression suite includes strong, weak, missing, unrelated-industry, and malformed evidence, plus a check that subscription evidence does not become an assertion of reconciliation pain.
+
+These are synthetic regression tests, not a benchmark of live model accuracy. An evaluation across real companies, independently labeled evidence, and seller correction time remains to be done. Custom criteria rely more heavily on the model's judgment. Website statements are not independently verified.
+
+The retriever reads HTML and checks public destinations, same-host boundaries, TLS, and robots permission. It does not execute JavaScript, access authenticated content, or research an entire website. Full HTML downloads are read without a byte cutoff; the model receives selected excerpts. JavaScript-heavy pages and sparse sites can produce unknown findings. Website text is treated as untrusted input by the agent prompt; source validation cannot eliminate prompt injection or incorrect inference.
+
+## Tests
+
+With the virtual environment active:
 
 ```sh
 python -m unittest discover -s tests -v
+node --test tests/test_frontend.cjs
 ```
 
-The latest verified suite has **84 passing tests**. Expected summary:
+Python tests mock provider/retrieval traffic and Salesforce requests. They exercise research, abstention, URL validation, snippet provenance, relevance guards, routing budgets, Vercel hosts, OAuth state, reviewed Task creation, and uncertain CRM outcomes. Frontend tests exercise CSV parsing, batch sequencing and pause behavior, saved state, and exports without consuming live quota.
 
-```text
-Ran 84 tests
-
-OK
-```
-
-The suite does not consume Gemini quota. It covers normal, sparse and invalid inputs; adaptive tool calls; evidence-ID validation; source targeting; outreach safeguards; HTML extraction; request pacing/budgets; TLS and provider errors; bounded HTTP 503 retry; public HTTP routes; HTTPS-origin handling; concurrency; and daily allowances.
-
-Live Atlassian research and local Waitress startup have also been exercised. Automated checks and successful live runs do not establish systematic model accuracy, buying intent or future service availability. Verify the deployed URL separately after each release.
-
-## How the agent works
-
-Python fetches the initial webpage. Gemini receives selected source excerpts and criterion-specific source suggestions, then chooses additional pages through `research_pages`. Python retrieves that batch. Gemini reviews the results and uses `complete_research` to select stable source snippet IDs, explain fit, identify unknowns and propose a discovery question.
-
-Python resolves those IDs to exact stored quotations and validates references before generating the report. The model selects sources and assesses evidence; conventional code controls retrieval, validation, budgets and exports. An invalid completion can be corrected within the remaining request allowance.
-
-The default limits are:
-
-| Resource | Limit |
-|---|---|
-| Gemini requests | Three total attempts, including any retry |
-| Pages | Four total: the initial page plus up to three agent-selected follow-ups |
-| Model-facing excerpts | Up to 3000 text characters per page |
-| Tool actions | Ten |
-| Research time | 180 seconds, checked between operations |
-| Individual model request | Up to 90 seconds, reduced by pacing and remaining time |
-
-The representative path can complete in two model requests. Only the first model decision can select additional pages; later decisions complete or correct the brief. One short HTTP 503 retry is allowed within the same three-attempt limit. Long retry delays, repeated 503s, timeouts and quota errors stop the run rather than loop.
-
-Full HTML and locally extracted article text have no byte/character cutoff. Only selected excerpts go to Gemini. The parser does not execute JavaScript. Network/DNS operations can add overhead beyond the checked run budget.
-
-## Evidence and outreach safeguards
-
-- Navigation/menu text, headers/footers, scripts, styles and hidden elements are excluded where identifiable.
-- Product descriptions, billing terms and customer-reach statements are prioritized over generic marketing copy.
-- The agent selects exact snippets by ID instead of retyping source quotations.
-- Each fit finding includes source references and an explanation. Common ICP categories also have conservative lexical checks.
-- Unsupported criteria remain unknown. Company statements are not independently verified, and lexical checks are not semantic proof.
-- Outreach uses evidence referenced by supported findings, avoids discontinued-product/refund/legal notices and uses a neutral opening when necessary.
-- Unverified workflows are phrased as conditional discovery questions. Human review remains necessary.
-
-The app does not send emails or change a CRM.
-
-## Implemented, mocked and deferred
-
-| Status | Scope |
-|---|---|
-| **Implemented** | Live Gemini tool-calling agent, public-page retrieval, targeted source selection, exact evidence references, fit explanations, unknowns, conditional discovery questions, reviewed outreach drafts, Markdown/JSON exports, CLI/API, production HTTP server and usage controls |
-| **Mocked for tests only** | Fictional company webpages and scripted Gemini responses; no production fallback to these mocks |
-| **Deferred** | External search-engine discovery, JavaScript rendering, contact enrichment, CRM integrations, email sending, persistent account history, multi-instance quota coordination and systematic accuracy/product validation |
-
-The website uses the adaptive agent by default. An explicit `workflow: efficient` CLI/API alternative retains a software-directed, single-model-request pipeline; it is not the website's default.
+`tests/fixtures/` contains synthetic company webpages and request data. Its `.example` URLs are fixture keys for tests. Use real company URLs in the live application.
 
 ## API
 
-| Endpoint | Behavior |
+| Endpoint | Purpose |
 |---|---|
-| `GET /api/health` | Public process health: `{"ok":true}`; no key or configuration values |
-| `POST /api/research` | Accepts the JSON input shown above; returns the brief or a structured error |
+| `GET /api/health` | Process health |
+| `POST /api/research` | Research `{url, product, criteria}`; agent workflow by default |
+| `GET /api/salesforce/status` | Whether OAuth is configured and this browser is connected |
+| `GET /api/salesforce/connect` | Start Salesforce authorization |
+| `GET /api/salesforce/callback` | Validate OAuth state and exchange the authorization code |
+| `POST /api/salesforce/disconnect` | Clear this browser's Salesforce session |
+| `POST /api/salesforce/save` | Create a reviewed account task for the connected user |
 
-`mode` can be omitted or set to `gemini`; other modes are rejected. `workflow` defaults to `agent`. Invalid input returns HTTP 400. Non-JSON requests return 415, oversized input returns 413, and concurrency/daily-limit rejections return 429. Provider failures return a structured research result with `status: Research unavailable` and `service_error`.
-
-## Deploy on Render
-
-Use `accountbrief` as the Git repository root, with `render.yaml` alongside `app.py`. For a Blueprint deployment, connect the repository, select `render.yaml`, confirm Free compute and provide `GEMINI_API_KEY` when prompted.
-
-For manual Web Service setup:
-
-| Setting | Value |
-|---|---|
-| Root Directory | Leave empty |
-| Build Command | `pip install -r requirements.txt` |
-| Start Command | `python app.py` |
-| Health Check Path | `/api/health` |
-
-Set these environment variables in Render:
-
-```dotenv
-APP_ENV=production
-HOST=0.0.0.0
-GEMINI_API_KEY=YOUR_PRIVATE_KEY
-GEMINI_MODEL=gemini-3.5-flash-lite
-GEMINI_RPM=5
-MAX_DAILY_RESEARCH=20
-```
-
-Adjust RPM and the daily allowance to your actual quota. Render supplies `PORT` and service-hostname metadata; `.python-version` selects Python 3.13. Do not upload `.env`. No visitor username/password is required. For a custom domain, set `APP_ORIGIN` to its HTTPS origin.
-
-After deployment, check that the public URL loads, `/api/health` returns only `{"ok":true}`, a real research run completes, invalid inputs fail clearly and report downloads work. Render Free can sleep when idle, so the first load may require a startup wait. Hosting startup delays and Gemini errors are separate issues.
-
-Only one research run executes at a time. The default production allowance is 20 research attempts per UTC day. The allowance and rate limiter are in-memory and reset on process restart/redeploy; they are not persistent, account-wide spending caps. Invalid inputs do not consume the research allowance; valid attempts count even if retrieval or the provider fails. Other tools using the same Google project consume its quota independently.
+Research input errors return 400, non-JSON returns 415, oversized requests return 413, and usage rejections return 429. Provider failures return `service_error` in the research result. CRM writes require same-origin requests, an authorized session, an Account ID, a brief, and `reviewed: true`.
 
 ## Project layout
 
 | Path | Purpose |
 |---|---|
-| `app.py` | Research core, agent, validation, exports and CLI/startup |
-| `server.py` | Flask routes, HTTPS/origin handling, usage controls and Waitress |
-| `static/` | Browser HTML, CSS and JavaScript |
-| `tests/` | Automated tests |
-| `tests/fixtures/` | Test-only synthetic inputs and webpages |
-| `tools/diagnose_gemini.py` | Optional manual diagnostic; uses the configured key and may consume quota |
-| `.env.example` | Shareable configuration template |
-| `requirements.txt` | Pinned dependencies |
-| `render.yaml` | Render deployment configuration |
-| `.python-version` | Hosted Python version selection |
+| `app.py` | Research agent, model routing, validation, report exports, and CLI |
+| `server.py` | Flask application factory, routes, host/origin checks, and usage controls |
+| `salesforce.py` | Salesforce OAuth and reviewed Task integration |
+| `index.py` | Vercel WSGI entrypoint |
+| `pyproject.toml`, `vercel.json` | Vercel entrypoint and function configuration |
+| `static/` | Research UI, profiles, browser history, CSV batches, and CRM review |
+| `tests/` | Python and frontend regression tests and synthetic fixtures |
+| `tools/diagnose_gemini.py` | Manual provider diagnostic that can consume quota |
+| `.env.example` | Configuration template |
 
-Public retrieval is restricted to the target hostname, public network destinations, verified TLS and robots permission. Cross-host redirects, login/paywall content and JavaScript-only content are not supported. A complete HTML download does not mean the entire website has been researched.
+`.env`, `.venv/`, and `.vercel/` are ignored by Git. The Vercel function bundle excludes local environment files, tests, tools, and virtual environments.
 
-## Time spent
+## Roadmap
 
-**3 hours total.**
-
-## AI use, checks and prior work
-
-I chose GTM account research because of my interest in revenue workflows and agentic AI. I used Codex to brainstorm and refine problem options, assist implementation, iterate prompts, develop tests, debug issues, and prepare documentation. Its output was checked through executable tests, local server checks and live account-research runs. Validation caught and corrected issues including altered source quotations, navigation text being used as evidence, inappropriate outreach assumptions and provider connection failures.
-
-The application was built in an empty workspace; no prior candidate application, proprietary customer dataset or existing candidate codebase was reused. Standard libraries and third-party Flask/Waitress dependencies were used. Official Gemini and Render documentation informed the integrations. Synthetic company content is confined to automated test fixtures. Source provenance checks do not eliminate incorrect inference, so fit judgments and drafts require review.
-
-## What I would investigate next
-
-1. Compare manual research, a checklist and AccountBrief with a small group of SDRs, account executives or founders. Measure preparation plus correction time and whether the resulting briefs are useful.
-2. Evaluate evidence relevance and appropriate abstention across varied sites, sparse pages, conflicting statements and adversarial page content. Track incorrect fit associations separately from fabricated quotations.
-3. Improve source discovery and extraction for sites requiring redirects or JavaScript, without overstating what was inspected.
-4. If demand is demonstrated, add saved customer profiles, account lists and reviewed CRM export. Introduce persistent/shared quota controls before expanding public usage.
-
-These are next investigations, not completed studies or claims of revenue impact.
-
-## References
-
-- [Gemini function calling](https://ai.google.dev/gemini-api/docs/function-calling)
-- [Gemini rate limits](https://ai.google.dev/gemini-api/docs/rate-limits)
-- [Gemini troubleshooting](https://ai.google.dev/gemini-api/docs/troubleshooting)
-- [Render web services](https://render.com/docs/web-services)
-- [Render free hosting](https://render.com/docs/free)
+- Validate research quality and preparation time with sellers across varied accounts.
+- Add durable, authenticated workspace storage and shared usage enforcement.
+- Persist batch queues so work can resume after closing the browser.
+- Add account lookup and org-specific field mapping for Salesforce.
+- Improve source discovery for JavaScript-heavy sites and conflicting statements.
