@@ -13,7 +13,7 @@ An agentic account research workspace for GTM and revenue teams. Research compan
 
 ## Run locally
 
-Use Python 3.10+ and a Gemini API key with access to the configured models. The deployment selects Python 3.13. Flask and Waitress dependencies are pinned in `requirements.txt`; the research core uses Python's standard library. Node.js is only needed for the frontend regression tests.
+Use Python 3.10+ and a Gemini API key with access to the configured models. The deployment selects Python 3.13. Flask and Waitress dependencies are pinned in `requirements.txt` and in `pyproject.toml` for Vercel. Keep both dependency lists in sync; the research core uses Python's standard library. Node.js is only needed for the frontend regression tests.
 
 From the repository root, containing `app.py`:
 
