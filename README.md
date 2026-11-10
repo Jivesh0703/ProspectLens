@@ -1,6 +1,6 @@
 # ProspectLens
 
-An agentic AI account research workspace for GTM and revenue teams. Turn company websites into source-backed account briefs, evaluate ideal customer profile (ICP) fit, prepare outreach for review, and save reviewed research to Salesforce CRM.
+An agentic AI account research workspace for GTM and revenue teams. Turn company websites into source-backed account briefs, evaluate ideal customer profile (ICP) fit, and prepare outreach with LLM-as-a-judge evaluation and human-in-the-loop review before saving research to Salesforce CRM.
 
 [Try ProspectLens](https://prospect-lens-jet.vercel.app/)
 
@@ -8,6 +8,8 @@ An agentic AI account research workspace for GTM and revenue teams. Turn company
 
 - Uses Gemini tool calling to choose relevant company pages and assess account fit.
 - Links findings to exact source excerpts and keeps unsupported criteria unknown.
+- Uses LLM-as-a-judge for agent evaluation, checking evidence relevance and unsupported outreach claims.
+- Requires human-in-the-loop review before saving research to Salesforce.
 - Researches CSV lists of up to 20 accounts, with pause and resume.
 - Saves customer profiles and the latest 30 briefs in your browser.
 - Searches Salesforce accounts and saves reviewed briefs as completed tasks.
