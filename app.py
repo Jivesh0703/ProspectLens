@@ -28,6 +28,9 @@ ROOT = Path(__file__).resolve().parent
 MAX_PAGES, MAX_CALLS, MAX_TURNS = 4, 10, 3
 MAX_SECONDS = 180
 MODEL_TIMEOUT_SECONDS = 90
+MAX_WORKFLOW_REQUESTS = 5
+MAX_WORKFLOW_SECONDS = 280
+MAX_EVALUATION_SECONDS = 120
 USER_AGENT = 'ProspectLens/0.1 (+local research prototype)'
 ROLES = ['Finance leader', 'Revenue operations leader', 'Sales leader', 'Operations leader']
 
@@ -348,7 +351,7 @@ customer stories, customer country counts or explicit worldwide customer stateme
 Allocate research slots across different missing criteria. If all three need evidence, use three targeted pages in one batch.
 Do not use all slots on the same criterion or generic software pages already covered.
 An office location alone is not international customer evidence. Generic teamwork/AI copy is not B2B software evidence.
-For every criterion include a concise reason connecting its cited excerpts to the criterion, or explaining missing evidence.
+For every criterion include one short sentence connecting its cited excerpts to the criterion, or explaining missing evidence. Keep the full completion compact: at most 6 snippets, 3 unknowns, and a short discovery question. Use only supplied snippet IDs in both snippet_ids and fit evidence_ids; never use display IDs such as E1.
 Prefer current product/pricing facts over sunset, refund, legal or discontinued-product notices; cite only useful direct evidence.
 No prose-only replies. Finish as soon as sufficient evidence exists. Only the first request permits more research; finish on request 2 and reserve request 3 for corrections."""
 AGENT_TOOLS = [
@@ -526,16 +529,40 @@ class Research:
             previous=list(self.evidence)
             try:
                 self.evidence=[]
-                mapping={sid:self.save(**self.snippets[sid])['id'] for sid in snippet_ids}
                 fit=brief.get('fit')
                 if not isinstance(fit,list):
                     raise InputError('Fit entries are required.')
-                mapped=[]
+                selected=[]
+                normalized=[]
+                reference_warnings=[]
                 for item in fit:
-                    if not isinstance(item,dict) or not isinstance(item.get('evidence_ids'),list) or any(not isinstance(sid,str) or sid not in mapping for sid in item['evidence_ids']):
-                        raise InputError('Fit evidence_ids must reference selected snippet IDs.')
-                    mapped.append({'criterion':item.get('criterion'),'evidence_ids':[mapping[sid] for sid in item['evidence_ids']], 'reason':item.get('reason','')})
-                return self.finish(**{**brief,'fit':mapped})
+                    if not isinstance(item,dict) or not isinstance(item.get('evidence_ids'),list) or any(not isinstance(sid,str) for sid in item['evidence_ids']):
+                        raise InputError('Fit evidence_ids must be a list of supplied snippet IDs.')
+                    ids=list(dict.fromkeys(item['evidence_ids']))
+                    reason=item.get('reason','')
+                    if any(sid not in self.snippets for sid in ids):
+                        ids=[]
+                        reason='Evidence references could not be resolved to retrieved snippets; this criterion needs manual review.'
+                        reference_warnings.append(str(item.get('criterion','Criterion'))+': unrecognized evidence references were discarded.')
+                    normalized.append({'criterion':item.get('criterion'),'evidence_ids':ids,'reason':reason})
+                # Keep complete citation sets; trimming part of a finding can change its meaning.
+                selected=[]
+                for item in sorted(normalized,key=lambda finding:len(finding['evidence_ids'])):
+                    needed=[sid for sid in item['evidence_ids'] if sid not in selected]
+                    if len(selected)+len(needed)>6:
+                        item['evidence_ids']=[]
+                        item['reason']='The citation set exceeded the brief evidence allowance; review this criterion manually.'
+                        reference_warnings.append(str(item['criterion'])+': evidence allowance reached; criterion left unknown.')
+                    else:
+                        selected.extend(needed)
+                # Retain explicitly selected excerpts only when space remains after cited evidence.
+                selected.extend(sid for sid in snippet_ids if sid not in selected)
+                selected=selected[:6]
+                mapping={sid:self.save(**self.snippets[sid])['id'] for sid in selected}
+                mapped=[{**item,'evidence_ids':[mapping[sid] for sid in item['evidence_ids']]} for item in normalized]
+                result=self.finish(**{**brief,'fit':mapped})
+                self.warnings.extend(reference_warnings)
+                return result
             except (InputError,TypeError,ValueError,KeyError):
                 self.evidence=previous
                 raise
@@ -630,6 +657,20 @@ def to_markdown(r):
     lines += ['- '+x for x in r['unknowns']]
     lines += ['', '## Outreach draft', r['outreach_draft'] or 'Withheld: insufficient relevant evidence.', '', r['review_note'], '', '## Warnings']
     lines += ['- '+x for x in r['warnings']]
+    evaluation=r.get('judge_evaluation')
+    if evaluation:
+        lines += ['', '## AI quality review', 'Status: '+evaluation['status']]
+        if evaluation['status']=='completed':
+            lines += ['Model: '+evaluation['judge_model'], 'Rubric: '+evaluation['rubric_version'],
+                      'Human review required: '+str(evaluation['summary']['review_required'])]
+            lines += [f"- {f['criterion']}: {f['verdict']}. {f['explanation']}" for f in evaluation['evaluation']['fit']]
+            for section in ('outreach','discovery'):
+                item=evaluation['evaluation'][section]
+                lines += [section.title()+': '+item['verdict']+'. '+item['explanation']]
+            lines += [f"- Unsupported claim ({c['section']}): {c['claim']} — {c['explanation']}" for c in evaluation['evaluation']['unsupported_claims']]
+            lines += [evaluation['limitations']]
+        else:
+            lines += [evaluation.get('error') or evaluation.get('reason','')]
     lines += ['', '## Tool execution trace']
     lines += [f"{t['step']}. {t['tool']} — {t['status']}: {t['detail']}" for t in r['trace']]
     return '\n'.join(lines) + '\n'
@@ -739,13 +780,13 @@ def run_gemini(research, transport=post_json):
     busy_retried=False
     while research.model_requests<MAX_TURNS:
         research.check_time()
-        allowed=['research_pages','complete_research'] if turn==0 else ['complete_research']
+        allowed=['research_pages','complete_research'] if turn==0 and research.model_requests<MAX_TURNS-1 else ['complete_research']
         remaining=MAX_SECONDS-(time.monotonic()-research.started)
         research.model_requests+=1
         try:
             response=transport(f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',{
                 'systemInstruction':{'parts':[{'text':AGENT_SYSTEM}]},'contents':contents,
-                'tools':[{'functionDeclarations':[{'name':t['name'],'description':t['description'],'parametersJsonSchema':t['parameters']} for t in AGENT_TOOLS]}],
+                'tools':[{'functionDeclarations':[{'name':t['name'],'description':t['description'],'parametersJsonSchema':t['parameters']} for t in AGENT_TOOLS if t['name'] in allowed]}],
                 'toolConfig':{'functionCallingConfig':{'mode':'ANY','allowedFunctionNames':allowed}},
                 'generationConfig':generation_config(model)}, {'x-goog-api-key':key},timeout=max(1,min(MODEL_TIMEOUT_SECONDS,remaining)))
         except ProviderBusyError as exc:
@@ -766,7 +807,7 @@ def run_gemini(research, transport=post_json):
         answers = []
         for call in calls:
             result = ({'error':'Research is complete for this run. Call complete_research with supplied snippet IDs now.'}
-                      if call.get('name')=='research_pages' and turn>0
+                      if call.get('name')=='research_pages' and (turn>0 or research.model_requests>=MAX_TURNS)
                       else research.call(call.get('name',''), call.get('args',{})))
             answer = {'name':call.get('name',''), 'response':result}
             if 'id' in call:
@@ -783,7 +824,12 @@ def run_gemini(research, transport=post_json):
             contents.append({'role':'user','parts':answers})
         else:
             contents.append({'role':'user','parts':[{'text':'Use the provided tools and finish with complete_research using supplied snippet IDs, or unknown where evidence is missing.'}]})
-    research.fallback('Gemini reached its turn or tool budget without a valid brief; manual research required.')
+    rejected=[event['detail'] for event in research.trace if event['status']=='error']
+    reason='Gemini could not finalize a valid brief within the research request budget.'
+    if rejected:
+        reason+=' Last validation issue: '+rejected[-1]
+    research.service_error=reason
+    research.fallback(reason)
 
 
 
@@ -892,7 +938,11 @@ def routed_transport(research, transport):
                 payload['contents']=[{'role':'user','parts':[{'text':json.dumps({
                     'offering':research.data['product'],'criteria':research.data['criteria'],
                     'retrieved_pages':[research.agent_page(p) for p in research.pages.values()],
-                    'instruction':'Use these retrieved snippets. Complete the brief with supplied IDs; do not refetch pages.'})}]}]
+                    'validation_feedback':[event['detail'] for event in research.trace if event['status']=='error'][-3:],
+                    'instruction':'Use these retrieved snippets and correct the validation feedback. Complete the brief with supplied IDs; do not refetch pages.'})}]}]
+            if research.data['workflow']=='agent' and research.model_requests>=MAX_TURNS:
+                payload['tools']=[{'functionDeclarations':[t for t in group['functionDeclarations'] if t['name']=='complete_research']} for group in body.get('tools',[])]
+                payload['toolConfig']={'functionCallingConfig':{'mode':'ANY','allowedFunctionNames':['complete_research']}}
             remaining=MAX_SECONDS-(time.monotonic()-research.started)
             try:
                 return transport(f'https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent',payload,headers,timeout=max(1,min(timeout,remaining)))
@@ -910,8 +960,68 @@ def routed_transport(research, transport):
     return request_model
 
 
+def attach_evaluation(research, transport):
+    """Evaluate completed research before returning it to browser, batch, or CLI callers."""
+    from judge import evaluate,JudgeResponseError
+    result=research.result()
+    result['evaluation_model_requests']=0
+    if result['service_error']:
+        result['judge_evaluation']={'status':'skipped','reason':'Research could not be completed.'}
+    else:
+        remaining=MAX_WORKFLOW_SECONDS-(time.monotonic()-research.started)
+        if remaining<10:
+            result['judge_evaluation']={'status':'unavailable','error':'Insufficient time to evaluate this brief. Review it manually.'}
+        else:
+            def judge_transport(*args,**kwargs):
+                result['evaluation_model_requests']+=1
+                return transport(*args,**kwargs)
+            model=research.models_used[-1] if research.models_used else os.getenv('GEMINI_MODEL','gemini-3.5-flash-lite')
+            configured=[os.getenv('GEMINI_MODEL','gemini-3.5-flash-lite')]+os.getenv('GEMINI_FALLBACK_MODELS','gemini-3.1-flash-lite').split(',')
+            models=list(dict.fromkeys([model]+[m.strip() for m in configured if m.strip()]))
+            unavailable_models=set()
+            deadline=min(research.started+MAX_WORKFLOW_SECONDS,time.monotonic()+MAX_EVALUATION_SECONDS)
+            attempted=[]
+            correction=None
+            allowance=max(0,min(4,MAX_WORKFLOW_REQUESTS-research.model_requests))
+            for attempt in range(allowance):
+                remaining=deadline-time.monotonic()
+                if remaining<10:
+                    result['judge_evaluation']={'status':'unavailable','error':'Quality review ran out of time. Review this brief manually.','models_attempted':attempted}
+                    break
+                attempted.append(model)
+                try:
+                    report=evaluate(result,model=model,transport=judge_transport,timeout=min(35,remaining),feedback=correction)
+                    result['judge_evaluation']={'status':'completed',**report,'models_attempted':attempted}
+                    break
+                except (InputError,OSError) as exc:
+                    result['judge_evaluation']={'status':'unavailable','error':str(exc),'models_attempted':attempted}
+                    eligible=isinstance(exc,(RetryableProviderError,ProviderBusyError,JudgeResponseError)) or getattr(exc,'status_code',None) in (404,429,500,502,504)
+                    if attempt+1>=allowance or not eligible:
+                        break
+                    if isinstance(exc,JudgeResponseError):
+                        correction=str(exc)
+                    if getattr(exc,'status_code',None)==404:
+                        unavailable_models.add(model)
+                    available=[candidate for candidate in models if candidate not in unavailable_models]
+                    if not available:
+                        break
+                    delay=max(2*(2**attempt),exc.retry_after if isinstance(exc,ProviderBusyError) else 0)
+                    if delay>30 or deadline-time.monotonic()<delay+10:
+                        break
+                    time.sleep(delay)
+                    alternatives=[candidate for candidate in available if candidate!=model]
+                    model=alternatives[0] if alternatives else available[0]
+            if not allowance:
+                result['judge_evaluation']={'status':'unavailable','error':'No model requests remain for quality review. Review this brief manually.','models_attempted':[]}
+    result['total_model_requests']=research.model_requests+result['evaluation_model_requests']
+    result['elapsed_seconds']=round(time.monotonic()-research.started,2)
+    result['markdown']=to_markdown(result)
+    return result
+
+
 def run(data, transport=post_json):
     research = Research(data)
+    judge_transport=transport
     try:
         transport=routed_transport(research,transport)
         if research.data['workflow'] == 'agent':
@@ -921,7 +1031,7 @@ def run(data, transport=post_json):
     except InputError as exc:
         research.service_error = str(exc)
         research.fallback(str(exc))
-    return research.result()
+    return attach_evaluation(research,judge_transport)
 
 
 def main():

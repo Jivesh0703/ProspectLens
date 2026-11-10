@@ -62,6 +62,26 @@ class ExtensionTests(unittest.TestCase):
         self.assertNotIn('thoughtSignature',json.dumps(calls[1][1]))
         self.assertEqual(research.models_used,['primary','secondary'])
 
+    def test_final_fallback_preserves_validation_feedback_and_forces_completion(self):
+        research=app.Research(REQUEST)
+        research.model_requests=2
+        research.event('complete_research',{},'error','Select supplied snippet IDs.')
+        calls=[]
+        def provider(url,body,*args,**kwargs):
+            calls.append(body)
+            if len(calls)==1:
+                error=app.InputError('Unavailable');error.status_code=404;raise error
+            return {'ok':True}
+        body={'contents':[], 'tools':[{'functionDeclarations':[{'name':'research_pages'},{'name':'complete_research'}]}]}
+        with patch.dict(os.environ,{'GEMINI_MODEL':'primary','GEMINI_FALLBACK_MODELS':'secondary'}):
+            app.routed_transport(research,provider)('',body)
+        self.assertEqual(research.model_requests,3)
+        final=calls[-1]
+        self.assertEqual(final['toolConfig']['functionCallingConfig']['allowedFunctionNames'],['complete_research'])
+        self.assertEqual([tool['name'] for tool in final['tools'][0]['functionDeclarations']],['complete_research'])
+        context=json.loads(final['contents'][0]['parts'][0]['text'])
+        self.assertEqual(context['validation_feedback'],['Select supplied snippet IDs.'])
+
     def test_routing_preserves_budget_and_stops_on_key_error(self):
         for status,initial,expected in [(429,1,3),(401,1,1),(404,3,1)]:
             with self.subTest(status=status,initial=initial):

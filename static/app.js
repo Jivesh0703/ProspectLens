@@ -8,6 +8,13 @@ function download(kind) {
  const url=URL.createObjectURL(new Blob([body],{type:kind==='json'?'application/json':'text/markdown'}));
  const a=document.createElement('a');a.href=url;a.download=`prospectlens-${lastResult.account}.${kind==='json'?'json':'md'}`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
+function evaluationMarkup(result) {
+ const review=result.judge_evaluation;
+ if(!review) return '<div class="panel result-section"><h3>AI quality review</h3><p class="small">Run research again to evaluate this saved brief.</p></div>';
+ if(review.status!=='completed') return `<div class="panel result-section"><div class="section-title"><h3>AI quality review</h3><span class="badge amber">Unavailable</span></div><p class="small">${escapeHtml(review.error || review.reason || 'Quality review could not be completed.')} Review this brief manually.</p>${review.models_attempted?.length?`<p class="small">Evaluation attempts: ${review.models_attempted.length} · ${review.models_attempted.map(escapeHtml).join(' → ')}</p>`:''}</div>`;
+ const evaluation=review.evaluation;
+ return `<div class="panel result-section quality-review"><div class="section-title"><h3>AI quality review</h3><span class="badge ${review.summary.review_required?'amber':''}">${review.summary.review_required?'Review flagged items':'No issues flagged'}</span></div>${evaluation.fit.map(f=>`<div class="fit-row"><span>${escapeHtml(f.criterion)}<small class="fit-reason">${escapeHtml(f.explanation)}</small></span><span>${escapeHtml(f.verdict)}</span></div>`).join('')}<p class="small"><strong>Outreach</strong> · ${escapeHtml(evaluation.outreach.explanation)}</p><p class="small"><strong>Discovery question</strong> · ${escapeHtml(evaluation.discovery.explanation)}</p>${evaluation.unsupported_claims.map(c=>`<div class="quality-flag"><strong>Review this ${escapeHtml(c.section)} claim</strong><p>“${escapeHtml(c.claim)}”</p><p>${escapeHtml(c.explanation)}</p></div>`).join('')}<p class="small">AI feedback can be wrong. Check the original sources before using the brief.</p></div>`;
+}
 function render(r) {
  const e=escapeHtml;
  if(r.service_error){
@@ -19,15 +26,15 @@ function render(r) {
  <div class="panel result-section" id="evidence-section"><div class="section-title"><h3>What the website actually says</h3><span class="section-label">SOURCE EVIDENCE</span></div>${r.evidence.length?r.evidence.map(item=>`<div class="evidence"><div class="evidence-line"><span class="eid">${e(item.id)}</span><div><p>“${e(item.quote)}”</p><a class="source" href="${e(item.source_url)}" target="_blank" rel="noopener noreferrer">${e(item.source_url)} ↗</a><p class="small">Retrieved · ${e(item.retrieved_at.slice(0,19))} UTC</p></div></div></div>`).join(''):'<p class="small">No relevant evidence was found. Try another page or refine your criteria.</p>'}<p class="small">Quotes are checked against retrieved text. Company claims are not independently verified.</p></div>
  <div class="panel result-section" id="hypothesis-section"><div class="section-title"><h3>A question to validate</h3><span class="section-label">HYPOTHESIS</span></div><div class="hypothesis">${e(r.hypothesis)}</div><p class="small">Suggested buyer role: <strong>${e(r.buyer_role)}</strong> · confirm during discovery</p><ul class="unknowns">${r.unknowns.map(x=>`<li>${e(x)}</li>`).join('')}</ul></div>
  <div class="panel result-section" id="draft-section"><div class="section-title"><h3>Start a better conversation</h3><span class="section-label">DRAFT · HUMAN REVIEW</span></div><pre class="draft">${e(r.outreach_draft||'Outreach withheld: insufficient relevant evidence. Research manually before personalizing a message.')}</pre><p class="small">${e(r.review_note)}</p><div class="export-row"><button class="export" id="export-md">Download brief .md ↓</button><button class="export" id="export-json">Download evidence .json ↓</button></div></div>
- <div class="panel result-section trace" id="trace-section"><details><summary>Research activity · ${r.trace.length} steps</summary><div class="trace-list">${r.trace.map(t=>`<div class="trace-row"><strong>${t.step.toString().padStart(2,'0')} / ${e(t.tool)} · ${e(t.status)}</strong><p>${e(t.detail)}</p><code>${e(JSON.stringify(t.arguments))}</code></div>`).join('')}</div></details>${r.warnings.map(w=>`<p class="warning">${e(w)}</p>`).join('')}</div>`;
+ <div class="panel result-section trace" id="trace-section"><details><summary>Research activity · ${r.trace.length} steps</summary><div class="trace-list">${r.trace.map(t=>`<div class="trace-row"><strong>${t.step.toString().padStart(2,'0')} / ${e(t.tool)} · ${e(t.status)}</strong><p>${e(t.detail)}</p><code>${e(JSON.stringify(t.arguments))}</code></div>`).join('')}</div></details>${r.warnings.map(w=>`<p class="warning">${e(w)}</p>`).join('')}</div>${evaluationMarkup(r)}`;
  attachSalesforceReview(r);
  $('#export-md').addEventListener('click',()=>download('md'));$('#export-json').addEventListener('click',()=>download('json'));
 }
 $('#research-form').addEventListener('submit',async event=>{
  event.preventDefault();if(batchRunning) return;$('#error').hidden=true;$('#run').disabled=true;$('#run').textContent='Researching…';$('#batch-start').disabled=true;
- $('#progress').textContent='Researching the company and checking sources. This may take a few minutes.';
+ $('#progress').textContent='Researching the company, checking sources, and evaluating the brief. This may take a few minutes.';
  // Clear the previous account so an error cannot leave stale results looking current.
- lastResult=null;$('#output').innerHTML='<div class="panel empty"><p class="eyebrow">RESEARCH IN PROGRESS</p><h2>Following the evidence.</h2><p>Inspecting pages and checking source quotations. Your brief will appear when the research is complete.</p></div>';
+ lastResult=null;$('#output').innerHTML='<div class="panel empty"><p class="eyebrow">RESEARCH IN PROGRESS</p><h2>Following the evidence.</h2><p>Inspecting sources and reviewing evidence relevance and outreach claims. Your brief and AI quality review will appear together.</p></div>';
  try{
   const researchInput={url:$('#url').value,product:$('#product').value,criteria:$('#criteria').value.split('\n').map(x=>x.trim()).filter(Boolean)};
   const response=await fetch('/api/research',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'gemini',workflow:'agent',...researchInput})});
@@ -217,7 +224,7 @@ $('#batch-start').addEventListener('click', async()=>{
      $('#batch-status').textContent='Batch paused after a provider or retrieval failure. Completed briefs are saved. Resume to continue remaining accounts.';
     } else {
      row.result=result;
-     row.status=result.coverage.supported<result.coverage.total?'Manual review needed':'Ready for review';
+     row.status=result.judge_evaluation?.status==='unavailable'?'AI quality review unavailable':result.judge_evaluation?.summary?.review_required?'Quality review flagged issues':result.coverage.supported<result.coverage.total?'Manual review needed':'Ready for review';
      saveBrief(input,result);
     }
    } catch(error) { row.status='Error: '+error.message; }
@@ -246,13 +253,13 @@ $('#batch-results').addEventListener('click',event=>{
 });
 $('#batch-export').addEventListener('click',()=>{
  if(!batchRows.length) return;
- downloadCsv([['website','status','supported','total','supported_criteria','unknown_criteria'],...batchRows.map(row=>[row.url,row.status,row.result?.coverage.supported ?? '',row.result?.coverage.total ?? '',row.result?.fit.filter(f=>f.evidence_ids.length).map(f=>f.criterion).join('; ') ?? '',row.result?.fit.filter(f=>!f.evidence_ids.length).map(f=>f.criterion).join('; ') ?? ''])],'prospectlens-batch.csv');
+ downloadCsv([['website','status','supported','total','supported_criteria','unknown_criteria','ai_quality_review'],...batchRows.map(row=>[row.url,row.status,row.result?.coverage.supported ?? '',row.result?.coverage.total ?? '',row.result?.fit.filter(f=>f.evidence_ids.length).map(f=>f.criterion).join('; ') ?? '',row.result?.fit.filter(f=>!f.evidence_ids.length).map(f=>f.criterion).join('; ') ?? '',row.result?.judge_evaluation?.status==='completed'?(row.result.judge_evaluation.summary.review_required?'Flagged for review':'No issues flagged'):row.result?.judge_evaluation?.status ?? ''])],'prospectlens-batch.csv');
 });
 function attachSalesforceReview(result) {
  if(!result.outreach_draft) return;
  const section=document.createElement('div');
  section.className='saved-tools';
- section.innerHTML='<h3>Save to Salesforce</h3><label><input id="review-confirm" type="checkbox" class="review-checkbox"> I reviewed the evidence, fit, and outreach draft.</label><label for="salesforce-search">Find the Salesforce account</label><div class="account-search-row"><input id="salesforce-search" type="search" maxlength="120" placeholder="Company name or website"><button id="salesforce-search-button" type="button" class="export">Search</button></div><p id="salesforce-search-status" class="help" role="status"></p><div id="salesforce-matches" class="account-matches" aria-label="Matching Salesforce accounts"></div><p id="salesforce-selection" class="help" role="status">Choose an account before saving.</p><button id="salesforce-save" class="export" disabled>Save reviewed brief to Salesforce</button><p id="salesforce-save-status" class="help" role="status"></p>';
+ section.innerHTML='<h3>Save to Salesforce</h3><label><input id="review-confirm" type="checkbox" class="review-checkbox"> I reviewed the evidence, AI quality feedback, fit, and outreach draft.</label><label for="salesforce-search">Find the Salesforce account</label><div class="account-search-row"><input id="salesforce-search" type="search" maxlength="120" placeholder="Company name or website"><button id="salesforce-search-button" type="button" class="export">Search</button></div><p id="salesforce-search-status" class="help" role="status"></p><div id="salesforce-matches" class="account-matches" aria-label="Matching Salesforce accounts"></div><p id="salesforce-selection" class="help" role="status">Choose an account before saving.</p><button id="salesforce-save" class="export" disabled>Save reviewed brief to Salesforce</button><p id="salesforce-save-status" class="help" role="status"></p>';
  $('#draft-section').append(section);
  const search=$('#salesforce-search');
  const searchButton=$('#salesforce-search-button');

@@ -185,3 +185,31 @@ test('editing account search clears the previous selection', async () => {
  await h.event('#salesforce-search','input');
  assert.equal(h.element('#salesforce-save').disabled,true);
 });
+
+test('quality review displays flagged claims with escaped model text', () => {
+ const h=harness();
+ const review={status:'completed',summary:{review_required:true},evaluation:{fit:[{criterion:'Subscription pricing',verdict:'partial',explanation:'Limited support.'}],outreach:{explanation:'Unverified pain.'},discovery:{explanation:'Conditional question.'},unsupported_claims:[{section:'outreach',claim:'<script>bad</script>',explanation:'Not established.'}]}};
+ const html=h.evaluate(`evaluationMarkup(${JSON.stringify({judge_evaluation:review})})`);
+ assert.match(html,/Review flagged items/);
+ assert.match(html,/&lt;script&gt;/);
+ assert.doesNotMatch(html,/<script>/);
+});
+
+test('quality review outage stays distinct from research failure', () => {
+ const h=harness();
+ const html=h.evaluate(`evaluationMarkup({judge_evaluation:{status:'unavailable',error:'Judge busy'}})`);
+ assert.match(html,/Unavailable/);
+ assert.match(html,/Judge busy/);
+ assert.match(html,/Review this brief manually/);
+});
+
+test('completed automatic evaluation is displayed at the end of the rendered brief', () => {
+ const h=harness({research:async()=>({ok:false,json:async()=>({error:'Not connected'})})});
+ const brief=result('example.com');
+ brief.judge_evaluation={status:'completed',summary:{review_required:false},evaluation:{fit:[{criterion:'Subscription pricing',verdict:'supported',explanation:'Monthly terms support recurring billing.'}],outreach:{explanation:'Grounded in cited evidence.'},discovery:{explanation:'Conditional and relevant.'},unsupported_claims:[]}};
+ h.evaluate(`render(${JSON.stringify(brief)})`);
+ const html=h.element('#output').innerHTML;
+ assert.match(html,/No issues flagged/);
+ assert.match(html,/Monthly terms support recurring billing/);
+ assert.ok(html.indexOf('AI quality review')>html.indexOf('Research activity'));
+});

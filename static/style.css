@@ -193,3 +193,5 @@ footer a { text-decoration: none; color: #70816b; }
 .account-match strong { display: block; font-size: 12px; }
 .account-match small { display: block; color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 .account-match:disabled { cursor: wait; opacity: .65; }
+
+.quality-review{border-color:#c9dbc3}.quality-flag{background:#fff8e9;border:1px solid #efdfba;border-radius:8px;padding:12px 14px;margin-top:12px;font-size:12px;color:#7b5b20}.quality-flag p{margin:7px 0 0;overflow-wrap:anywhere}

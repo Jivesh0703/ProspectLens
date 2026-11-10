@@ -17,6 +17,8 @@ SAMPLE = json.loads((Path(__file__).parent/'fixtures/request.json').read_text())
 
 class WorkflowTests(unittest.TestCase):
     def setUp(self):
+        evaluation=patch('app.attach_evaluation',side_effect=lambda research,transport:research.result())
+        evaluation.start();self.addCleanup(evaluation.stop)
         env=patch.dict(os.environ,{'GEMINI_FALLBACK_MODELS':''})
         env.start();self.addCleanup(env.stop)
         self.real_pacer=app.pace_provider
@@ -401,6 +403,68 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(len(r.evidence),1)
         self.assertEqual(r.trace[-2]['status'],'error')
         self.assertEqual(r.trace[-1]['status'],'ok')
+    def test_exhausted_invalid_completions_are_service_failures(self):
+        research=app.Research(SAMPLE)
+        requests=[]
+        def provider(url,body,headers=None,**kwargs):
+            requests.append(body)
+            return {'candidates':[{'content':{'role':'model','parts':[{'functionCall':{'name':'complete_research','args':{'snippet_ids':['invented-id']}}}]}}]}
+        with patch.dict(os.environ,{'GEMINI_API_KEY':'test-key'}):
+            app.run_gemini(research,provider)
+        self.assertEqual(len(requests),3)
+        self.assertEqual(requests[-1]['toolConfig']['functionCallingConfig']['allowedFunctionNames'],['complete_research'])
+        declarations=requests[-1]['tools'][0]['functionDeclarations']
+        self.assertEqual([tool['name'] for tool in declarations],['complete_research'])
+        self.assertIn('Last validation issue',research.service_error)
+        self.assertEqual(research.result()['status'],'Research unavailable')
+        self.assertIsNone(research.result()['outreach_draft'])
+
+    def test_valid_fit_reference_omitted_from_selection_is_resolved(self):
+        research=app.Research(SAMPLE)
+        page=research.fetch(SAMPLE['url'])
+        snippets=research.agent_page(page)['snippets']
+        snippet=next(s for s in snippets if 'builds B2B software' in s['quote'])
+        result=research.call('complete_research',{'snippet_ids':[], 'fit':[{'criterion':c,'evidence_ids':[snippet['id']] if i==0 else []} for i,c in enumerate(SAMPLE['criteria'])], 'hypothesis':'Is this relevant?', 'buyer_role':'Finance leader','unknowns':[]})
+        self.assertTrue(result['accepted'])
+        self.assertEqual(research.result()['coverage']['supported'],1)
+        self.assertEqual(research.result()['evidence'][0]['quote'],snippet['quote'])
+
+    def test_unresolvable_fit_reference_abstains_without_losing_valid_findings(self):
+        research=app.Research(SAMPLE)
+        page=research.fetch(SAMPLE['url'])
+        snippet=next(s for s in research.agent_page(page)['snippets'] if 'builds B2B software' in s['quote'])
+        findings=[{'criterion':SAMPLE['criteria'][0],'evidence_ids':[snippet['id']]}, {'criterion':SAMPLE['criteria'][1],'evidence_ids':['E999']}, {'criterion':SAMPLE['criteria'][2],'evidence_ids':[]}]
+        result=research.call('complete_research',{'snippet_ids':[snippet['id']],'fit':findings,'hypothesis':'Is this relevant?','buyer_role':'Finance leader','unknowns':[]})
+        self.assertTrue(result['accepted'])
+        output=research.result()
+        self.assertEqual(output['coverage']['supported'],1)
+        self.assertEqual(output['fit'][1]['status'],'Unknown')
+        self.assertIn('unrecognized evidence references', ' '.join(output['warnings']))
+        self.assertNotIn('E999',[e['id'] for e in output['evidence']])
+
+    def test_unused_selected_snippets_do_not_displace_fit_evidence(self):
+        research=app.Research(SAMPLE)
+        research.fixture={SAMPLE['url']:'<main>'+''.join('<p>Business cloud software for customer teams number '+str(i)+'.</p>' for i in range(10))+'</main>'}
+        page=research.fetch(SAMPLE['url'])
+        snippets=research.agent_page(page)['snippets']
+        chosen=snippets[6]['id']
+        findings=[{'criterion':c,'evidence_ids':[chosen] if i==0 else []} for i,c in enumerate(SAMPLE['criteria'])]
+        accepted=research.call('complete_research',{'snippet_ids':[item['id'] for item in snippets[:6]],'fit':findings,'hypothesis':'Is this relevant?','buyer_role':'Finance leader','unknowns':[]})
+        self.assertTrue(accepted['accepted'])
+        self.assertEqual(research.result()['coverage']['supported'],1)
+        self.assertEqual(research.result()['evidence'][0]['quote'],snippets[6]['quote'])
+
+    def test_excess_fit_citations_abstain_instead_of_failing_entire_brief(self):
+        research=app.Research(SAMPLE)
+        research.fixture={SAMPLE['url']:'<main>'+''.join('<p>Business cloud software for customer teams number '+str(i)+'.</p>' for i in range(10))+'</main>'}
+        snippets=research.agent_page(research.fetch(SAMPLE['url']))['snippets']
+        findings=[{'criterion':c,'evidence_ids':[item['id'] for item in snippets[:7]] if i==0 else []} for i,c in enumerate(SAMPLE['criteria'])]
+        accepted=research.call('complete_research',{'snippet_ids':[],'fit':findings,'hypothesis':'Is this relevant?','buyer_role':'Finance leader','unknowns':[]})
+        self.assertTrue(accepted['accepted'])
+        self.assertEqual(research.result()['fit'][0]['status'],'Unknown')
+        self.assertIsNone(research.service_error)
+        self.assertIn('allowance reached',' '.join(research.warnings))
+
     def test_snippet_ids_are_stable_and_unknown_ids_rejected(self):
         r=app.Research(SAMPLE);page=r.fetch(SAMPLE['url'])
         first=r.agent_page(page);second=r.agent_page(page)

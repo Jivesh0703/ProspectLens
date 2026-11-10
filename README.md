@@ -82,10 +82,28 @@ The CRM workflow is demonstrated in the owner's demo org. Other Salesforce orgs 
 - Public HTML research is limited to four pages on the same website to keep requests manageable within Gemini’s free-tier quotas. JavaScript rendering and logged-in content are outside the current scope.
 - Salesforce integration is demonstrated in the owner’s demo org. Cross-org distribution is outside the current release and requires additional Salesforce setup and administrator approval. Research and exports work without Salesforce.
 - Exact quotes establish source provenance; fit inferences and outreach still need human review.
-- Gemini quota and availability affect research. Fallback shares the same three-attempt budget and does not increase quota.
+- Gemini quota and availability affect research. Research fallback shares the same three-attempt budget. Automatic quality review normally adds one request; research and evaluation share a five-request total cap; neither increases quota.
 - Profiles and briefs stay in the current browser. Batch queues require the tab to remain open.
 - Hosted research uses the owner's Gemini quota. Usage counters are per process and can reset or run separately across Vercel instances.
 - Salesforce sessions expire. If a save has an uncertain outcome, check Salesforce before retrying.
+
+## LLM-as-a-judge Evaluation
+
+Every completed research run includes an LLM-as-a-judge step before the brief is returned. This applies to single accounts, CSV batches, and CLI research. The judge evaluates whether cited excerpts support each fit criterion, checks for unsupported outreach claims, and reviews the discovery question.
+
+Research normally takes two model requests, leaving up to three evaluation attempts within a shared **five-request total cap**. A third research request is reserved for recovery when needed, leaving two evaluation attempts. The judge rotates configured models on eligible failures. Actual attempts depend on remaining quota. Invalid judge responses trigger a correction attempt with the specific validation feedback, within the same request cap. 
+
+If research fails, evaluation is skipped. If the judge fails, times out, or returns invalid feedback, the completed brief remains available with **AI quality review unavailable**. Findings remain unchanged; users review any quality flags before using outreach or saving to Salesforce.
+
+The judge assesses the evidence retrieved by research. Feedback needs human review. Tests use mocked judge responses and do not establish live judge accuracy.
+
+To re-evaluate a downloaded JSON brief separately, the same evaluator is also available from the terminal:
+
+```sh
+python tools/evaluate_brief.py --input brief.json --output evaluation.json
+```
+
+Use `--model YOUR_GEMINI_MODEL` to select another model for that manual run. No additional API key or setup is needed for automatic evaluation.
 
 ## Development
 
@@ -96,4 +114,4 @@ python -m unittest discover -s tests -v
 node --test tests/test_frontend.cjs
 ```
 
-Tests use synthetic website fixtures and mocked provider/CRM responses.
+Tests use synthetic website fixtures and mocked provider, CRM, and LLM judge responses.
